@@ -438,6 +438,97 @@ def start_server(host: str = "0.0.0.0", port: int = 8765):
         access_log=True
     )
 
+
+# =============================================
+# 知识库 CRUD API（分析范式管理）
+# =============================================
+from news_factor.knowledge_base import get_knowledge_base
+from fastapi import Body
+
+@app.get("/paradigms", summary="获取范式列表")
+def list_paradigms(category: str = None, active_only: bool = True):
+    """
+    获取所有事件分析范式
+    @query category: 大类筛选（geo_conflict/macro_policy/disaster/financial/political/industry）
+    @query active_only: 是否只返回启用的范式（默认 true）
+    """
+    kb = get_knowledge_base()
+    paradigms = kb.list_paradigms(category=category, active_only=active_only)
+    return {"success": True, "total": len(paradigms), "paradigms": paradigms}
+
+@app.get("/paradigms/search", summary="搜索范式")
+def search_paradigms(q: str):
+    """
+    按关键词搜索范式（匹配 name/description/trigger_keywords）
+    @query q: 搜索词
+    """
+    kb = get_knowledge_base()
+    results = kb.search_paradigms(q)
+    return {"success": True, "total": len(results), "paradigms": results}
+
+@app.get("/paradigms/{paradigm_id}", summary="获取单个范式")
+def get_paradigm(paradigm_id: int):
+    """获取指定 id 的范式详情"""
+    kb = get_knowledge_base()
+    p = kb.get_paradigm(paradigm_id)
+    if not p:
+        return {"success": False, "error": f"范式 {paradigm_id} 不存在或已禁用"}
+    return {"success": True, "paradigm": p}
+
+@app.post("/paradigms", summary="新增范式")
+def add_paradigm(data: dict = Body(...)):
+    """
+    新增事件分析范式
+    Body 必填：category, subcategory, name, trigger_keywords, market_impact
+    Body 可选：description, severity_multiplier, duration_days, historical_cases
+    """
+    required = ["category", "subcategory", "name", "trigger_keywords", "market_impact"]
+    for field in required:
+        if field not in data:
+            return {"success": False, "error": f"缺少必填字段: {field}"}
+    kb = get_knowledge_base()
+    paradigm_id = kb.add_paradigm(data, created_by=data.get("created_by", "user"))
+    return {"success": True, "id": paradigm_id, "message": "范式已创建"}
+
+@app.put("/paradigms/{paradigm_id}", summary="全量更新范式")
+@app.patch("/paradigms/{paradigm_id}", summary="部分更新范式")
+def update_paradigm(paradigm_id: int, data: dict = Body(...)):
+    """
+    更新范式（支持部分更新，只传需要改的字段即可）
+    例如只更新 market_impact：{"market_impact": {"A股": {...}}}
+    """
+    kb = get_knowledge_base()
+    success = kb.update_paradigm(paradigm_id, data)
+    if not success:
+        return {"success": False, "error": f"范式 {paradigm_id} 不存在或无有效字段"}
+    return {"success": True, "message": f"范式 {paradigm_id} 已更新"}
+
+@app.delete("/paradigms/{paradigm_id}", summary="删除范式（软删除）")
+def delete_paradigm(paradigm_id: int):
+    """
+    软删除范式（设 is_active=0，数据保留可恢复）
+    若要彻底删除，请直接操作数据库
+    """
+    kb = get_knowledge_base()
+    success = kb.delete_paradigm(paradigm_id)
+    return {"success": success, "message": f"范式 {paradigm_id} 已禁用" if success else "范式不存在"}
+
+@app.post("/paradigms/match", summary="从新闻文本匹配相关范式")
+def match_paradigms(data: dict = Body(...)):
+    """
+    RAG 检索：从新闻标题/正文中匹配最相关的分析范式
+    Body: {"title": "新闻标题", "body": "正文（可选）", "top_k": 3}
+    Returns: 按相关度排序的范式列表（含 match_score）
+    """
+    kb = get_knowledge_base()
+    results = kb.match_paradigms(
+        news_title=data.get("title", ""),
+        news_body=data.get("body", ""),
+        top_k=data.get("top_k", 3)
+    )
+    return {"success": True, "matched": len(results), "paradigms": results}
+
+
 if __name__ == "__main__":
     # 从环境变量读取配置
     host = os.getenv("TRADING_AGENTS_HOST", "0.0.0.0")

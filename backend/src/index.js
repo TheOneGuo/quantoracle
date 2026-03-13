@@ -1250,6 +1250,95 @@ app.get('/api/cloudmap-proxy', async (req, res) => {
 });
 
 // =============================================
+// 知识库代理 API（M4）- 转发到 TradingAgents :8765
+// =============================================
+
+/**
+ * 代理知识库 CRUD 到 TradingAgents Python 服务
+ * 当 TradingAgents 不可达时，返回前5条 mock 范式
+ *
+ * 路由：GET/POST/PATCH/DELETE /api/knowledge/paradigms[/:id]
+ */
+const TRADING_AGENTS_URL = process.env.TRADING_AGENTS_URL || 'http://localhost:8765';
+
+// mock 范式（TradingAgents 不可达时的兜底数据）
+const MOCK_PARADIGMS = [
+  { id: 1, category: "geo_conflict", subcategory: "war_outbreak", name: "战争爆发",
+    trigger_keywords: ["战争", "开战", "军事行动", "空袭"], severity_multiplier: 2.0, duration_days: 30,
+    market_impact: { "A股": { benefit: ["军工","黄金ETF"], damage: ["消费","旅游"], rationale: "战争刺激军工需求" } } },
+  { id: 2, category: "geo_conflict", subcategory: "sanctions", name: "经济制裁",
+    trigger_keywords: ["制裁", "禁令", "出口管制", "实体清单"], severity_multiplier: 1.5, duration_days: 60,
+    market_impact: { "A股": { benefit: ["国产替代","军工"], damage: ["依赖进口原材料行业"], rationale: "倒逼国产替代" } } },
+  { id: 3, category: "macro_policy", subcategory: "fed_rate_hike", name: "美联储加息",
+    trigger_keywords: ["美联储加息", "Fed加息", "缩表", "鹰派"], severity_multiplier: 1.5, duration_days: 14,
+    market_impact: { "美股": { benefit: ["银行","保险"], damage: ["科技成长","REITs"], rationale: "压制成长估值" } } },
+  { id: 4, category: "macro_policy", subcategory: "china_fiscal_stimulus", name: "中国财政刺激",
+    trigger_keywords: ["财政刺激", "专项债", "扩大内需", "消费补贴"], severity_multiplier: 1.8, duration_days: 60,
+    market_impact: { "A股": { benefit: ["基建","消费","家电"], damage: [], rationale: "直接提振相关产业链" } } },
+  { id: 5, category: "industry", subcategory: "ai_breakthrough", name: "AI重大突破",
+    trigger_keywords: ["AI突破", "大模型发布", "GPT", "人工智能革命"], severity_multiplier: 1.5, duration_days: 30,
+    market_impact: { "A股": { benefit: ["AI算力","数据中心","国产大模型"], damage: [], rationale: "算力需求爆发" } } },
+];
+
+/**
+ * 代理请求到 TradingAgents，失败时返回 mock 数据
+ * @param {string} path - TradingAgents 路径（如 /paradigms）
+ * @param {string} method - HTTP 方法
+ * @param {Object} body - 请求体（POST/PATCH）
+ * @returns {Promise<Object>} 响应数据
+ */
+async function proxyToTradingAgents(path, method = 'GET', body = null) {
+  try {
+    const opts = { method, headers: { 'Content-Type': 'application/json' }, timeout: 5000 };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(`${TRADING_AGENTS_URL}${path}`, opts);
+    return { ...(await resp.json()), is_mock: false };
+  } catch (e) {
+    // TradingAgents 不可达，返回 mock 数据
+    return { success: true, paradigms: MOCK_PARADIGMS, total: MOCK_PARADIGMS.length, is_mock: true };
+  }
+}
+
+// GET 范式列表
+app.get('/api/knowledge/paradigms', async (req, res) => {
+  const { category, active_only } = req.query;
+  const qs = new URLSearchParams();
+  if (category) qs.set('category', category);
+  if (active_only) qs.set('active_only', active_only);
+  res.json(await proxyToTradingAgents(`/paradigms?${qs}`));
+});
+
+// 搜索范式
+app.get('/api/knowledge/paradigms/search', async (req, res) => {
+  res.json(await proxyToTradingAgents(`/paradigms/search?q=${encodeURIComponent(req.query.q || '')}`));
+});
+
+// 获取单个范式
+app.get('/api/knowledge/paradigms/:id', async (req, res) => {
+  res.json(await proxyToTradingAgents(`/paradigms/${req.params.id}`));
+});
+
+// 新增范式
+app.post('/api/knowledge/paradigms', async (req, res) => {
+  res.json(await proxyToTradingAgents('/paradigms', 'POST', req.body));
+});
+
+// 从新闻匹配范式（RAG检索）
+app.post('/api/knowledge/paradigms/match', async (req, res) => {
+  res.json(await proxyToTradingAgents('/paradigms/match', 'POST', req.body));
+});
+
+// 部分更新范式
+app.patch('/api/knowledge/paradigms/:id', async (req, res) => {
+  res.json(await proxyToTradingAgents(`/paradigms/${req.params.id}`, 'PATCH', req.body));
+});
+
+// 软删除范式
+app.delete('/api/knowledge/paradigms/:id', async (req, res) => {
+  res.json(await proxyToTradingAgents(`/paradigms/${req.params.id}`, 'DELETE'));
+});
+
+// =============================================
 // 策略广场 API（M3）
 // =============================================
 const { MOCK_STRATEGIES } = require('./mock/marketplace-mock');
