@@ -34,8 +34,13 @@ class LLMClient:
         self.openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
         
         # 模型配置
-        self.ollama_model = "qwen2.5:9b"  # 主力模型
-        self.openrouter_model = "deepseek/deepseek-v3.2"  # 兜底模型
+        # 主力：Ollama 本地（Mac Mini M4，离线时自动降级）
+        self.ollama_model = "qwen2.5:9b"
+        # 当前兜底：StepFun step-3.5-flash（免费，OpenRouter）
+        # 待 Mac Mini 上线后可切回 deepseek/deepseek-v3.2
+        self.openrouter_model = os.getenv(
+            "OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"
+        )
         
         # 超时配置（秒）
         self.ollama_timeout = 60
