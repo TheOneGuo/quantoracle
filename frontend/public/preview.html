@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智盈云 QuantOracle - 预览</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+.header { background: #1a1d2e; padding: 12px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #2d3748; flex-shrink: 0; }
+.logo { font-size: 18px; font-weight: 700; color: #63b3ed; }
+.slogan { font-size: 12px; color: #718096; }
+.nav { display: flex; gap: 6px; margin-left: auto; }
+.nav-btn { background: #2d3748; border: none; color: #e2e8f0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .2s; }
+.nav-btn:hover, .nav-btn.active { background: #4299e1; color: white; }
+.tabs { background: #1a1d2e; padding: 8px 16px; display: flex; gap: 8px; border-bottom: 1px solid #2d3748; flex-shrink: 0; }
+.tab { background: #2d3748; border: none; color: #a0aec0; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all .2s; }
+.tab:hover { background: #4a5568; color: #e2e8f0; }
+.tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; box-shadow: 0 2px 8px rgba(102,126,234,.4); }
+.content { flex: 1; position: relative; overflow: hidden; }
+.panel { display: none; width: 100%; height: 100%; }
+.panel.active { display: block; }
+iframe { width: 100%; height: 100%; border: none; }
+.note { position: absolute; bottom: 8px; right: 12px; font-size: 11px; color: #4a5568; }
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="logo">📈 智盈云 QuantOracle</span>
+  <span class="slogan">助你买在无人问津处，卖在人声鼎沸时</span>
+  <div class="nav">
+    <button class="nav-btn active" onclick="showSection('cloudmap')">📊 大盘云图</button>
+    <button class="nav-btn" onclick="showSection('worldmonitor')">🌍 全球监控</button>
+    <button class="nav-btn" onclick="showSection('globalmarkets')">📈 全球市场</button>
+  </div>
+</div>
+
+<!-- 大盘云图 Tabs -->
+<div id="section-cloudmap">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('cloudmap','a_share',this)">A股大盘云图</button>
+    <button class="tab" onclick="switchTab('cloudmap','us',this)">美股云图</button>
+    <button class="tab" onclick="switchTab('cloudmap','hk',this)">港股云图</button>
+    <button class="tab" onclick="switchTab('cloudmap','forex',this)">外汇云图</button>
+  </div>
+  <div class="content">
+    <div class="panel active" id="cloudmap-a_share">
+      <iframe src="https://dapanyuntu.com/" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+    <div class="panel" id="cloudmap-us">
+      <iframe src="https://finviz.com/map.ashx" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
+    </div>
+    <div class="panel" id="cloudmap-hk">
+      <iframe src="https://s.tradingview.com/embed-widget/stock-heatmap/?locale=zh_CN#%7B%22exchanges%22%3A%5B%22HKEX%22%5D%2C%22dataSource%22%3A%22HKEX%22%2C%22grouping%22%3A%22sector%22%2C%22blockSize%22%3A%22market_cap_basic%22%2C%22blockColor%22%3A%22change%22%2C%22locale%22%3A%22zh_CN%22%2C%22colorTheme%22%3A%22dark%22%2C%22hasTopBar%22%3Afalse%2C%22isZoomEnabled%22%3Atrue%2C%22width%22%3A%22100%25%22%2C%22height%22%3A%22100%25%22%7D"></iframe>
+    </div>
+    <div class="panel" id="cloudmap-forex">
+      <iframe src="https://www.myfxbook.com/zh/forex-market/heat-map" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+    <div class="note">智盈云 QuantOracle · 原型预览</div>
+  </div>
+</div>
+
+<!-- 全球监控 Tabs -->
+<div id="section-worldmonitor" style="display:none; flex-direction:column; height:calc(100vh - 57px);">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('worldmonitor','geo',this)">🌍 地缘政治</button>
+    <button class="tab" onclick="switchTab('worldmonitor','tech',this)">💻 科技情报</button>
+    <button class="tab" onclick="switchTab('worldmonitor','finance',this)">💹 金融市场</button>
+  </div>
+  <div class="content">
+    <div class="panel active" id="worldmonitor-geo">
+      <iframe src="https://worldmonitor.app/" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+    <div class="panel" id="worldmonitor-tech">
+      <iframe src="https://tech.worldmonitor.app/" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+    <div class="panel" id="worldmonitor-finance">
+      <iframe src="https://finance.worldmonitor.app/" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- 全球市场 -->
+<div id="section-globalmarkets" style="display:none; flex-direction:column; height:calc(100vh - 57px);">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('globalmarkets','tv',this)">TradingView 全球</button>
+    <button class="tab" onclick="switchTab('globalmarkets','ft',this)">Financial Times</button>
+  </div>
+  <div class="content">
+    <div class="panel active" id="globalmarkets-tv">
+      <iframe src="https://www.tradingview.com/markets/" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+    <div class="panel" id="globalmarkets-ft">
+      <iframe src="https://markets.ft.com/data" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+function showSection(name) {
+  ['cloudmap','worldmonitor','globalmarkets'].forEach(s => {
+    const el = document.getElementById('section-'+s);
+    el.style.display = s === name ? 'flex' : 'none';
+    if (s === name) el.style.flexDirection = 'column';
+  });
+  document.querySelectorAll('.nav-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['cloudmap','worldmonitor','globalmarkets'][i] === name);
+  });
+}
+function switchTab(section, tab, btn) {
+  // hide all panels in this section
+  document.querySelectorAll('#section-'+section+' .panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(section+'-'+tab).classList.add('active');
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+}
+// init
+showSection('cloudmap');
+</script>
+</body>
+</html>
