@@ -18,7 +18,7 @@ function CloudMap() {
     { 
       id: 'forex', 
       label: '外汇云图', 
-      primaryUrl: 'https://www.xtrendspeed.com/zh-CN/market/of/forex/heat_map', 
+      primaryUrl: 'https://www.myfxbook.com/zh/forex-market/heat-map', 
       fallbackUrl: 'https://s.tradingview.com/embed-widget/forex-heat-map/?locale=zh_CN#{"width":"100%","height":"100%","currencies":["EUR","USD","JPY","GBP","CHF","AUD","CAD","NZD","CNY"],"isTransparent":false,"colorTheme":"dark","locale":"zh_CN"}'
     },
   ];
