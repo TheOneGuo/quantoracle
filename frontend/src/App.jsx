@@ -1148,7 +1148,7 @@ function App() {
             </span>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="header-button-group">
           <button
             className="btn-hot-stock-analysis"
             onClick={goToCloudMap}

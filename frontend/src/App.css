@@ -50,6 +50,11 @@ body {
   z-index: 100;
 }
 
+.header-button-group {
+  display: flex;
+  gap: 8px;
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -1708,3 +1713,22 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* 手机 */
+@media (max-width: 767px) {
+  .main-container { flex-direction: column !important; display: flex !important; }
+  .left-column, .middle-column, .panel.config-section { width: 100% !important; min-width: unset !important; }
+  /* 顶部 header 的 ticker 和按钮要可横向滚动 */
+  .market-ticker { overflow-x: auto; white-space: nowrap; }
+  /* 按钮组也要响应式 */
+  .header-button-group { flex-wrap: wrap; gap: 4px; }
+  .btn-hot-stock-analysis { font-size: 12px; padding: 5px 10px; }
+}
+/* 平板 */
+@media (768px <= width <= 1024px) {
+  .main-container { flex-wrap: wrap; display: flex; }
+  .left-column { width: 100% !important; }
+  .middle-column { flex: 1; }
+  .panel.config-section { width: 320px; }
+}
+

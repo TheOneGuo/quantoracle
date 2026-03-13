@@ -99,3 +99,16 @@
   border: none;
   background: #000;
 }
+
+/* 手机 */
+@media (max-width: 767px) {
+  .worldmonitor-header { padding: 8px 12px; }
+  .worldmonitor-title { display: none; }
+  .worldmonitor-subtitle { display: none; }
+  .worldmonitor-tab-container { overflow-x: auto; white-space: nowrap; gap: 4px; -webkit-overflow-scrolling: touch; }
+  .worldmonitor-tab { padding: 6px 12px; font-size: 12px; }
+}
+/* 平板 */
+@media (768px <= width <= 1024px) {
+  .worldmonitor-tab { padding: 7px 14px; font-size: 13px; }
+}

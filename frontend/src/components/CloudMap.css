@@ -80,3 +80,15 @@
   border: none;
   background: #fff;
 }
+
+/* 手机 */
+@media (max-width: 767px) {
+  .cloudmap-header { padding: 8px 12px; }
+  .cloudmap-title { display: none; }
+  .cloudmap-tab-container { overflow-x: auto; white-space: nowrap; gap: 4px; -webkit-overflow-scrolling: touch; }
+  .cloudmap-tab { padding: 6px 12px; font-size: 12px; }
+}
+/* 平板 */
+@media (768px <= width <= 1024px) {
+  .cloudmap-tab { padding: 7px 14px; font-size: 13px; }
+}
