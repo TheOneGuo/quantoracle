@@ -645,3 +645,145 @@ GET  /api/marketplace/leaderboard         // 排行榜
 
 **文档版本**：v1.0  
 **下次审阅**：M1 完成后
+
+---
+
+## 十一、AI 中转站商业模式（新增）
+
+> 智盈云作为 AI Token 中转平台，用户使用 AI 功能消耗平台 Token，平台向大模型厂商批量采购后加价转售，形成稳定收益流。
+
+### 11.1 用户侧：模型选择权
+
+用户在使用 TradingAgents 选股/分析时，可自主选择 AI 大模型：
+
+| 模型等级 | 示例模型 | Token 单价 | 适用场景 |
+|----------|----------|-----------|---------|
+| 免费（受限） | StepFun step-3.5-flash | 0 | 体验/低频 |
+| 标准 | DeepSeek V3 / Qwen2.5 | ¥0.05/千token | 日常选股 |
+| 高级 | Claude Sonnet / GPT-4o | ¥0.2/千token | 深度研究 |
+| 旗舰 | Claude Opus / GPT-4 | ¥0.8/千token | 重大决策分析 |
+
+**实现方式**：
+- 前端 AI 功能页面顶部提供模型选择器（下拉/卡片切换）
+- 用户选择后记录偏好（localStorage + 账户设置）
+- 后端根据选择路由到对应模型（通过 OpenRouter 统一接入）
+- 每次调用记录 token 消耗 → 计入账户余额扣减
+
+### 11.2 平台侧：Token 转售盈利
+
+```
+用户充值（微信/支付宝） → 平台余额
+    ↓ 用户调用 AI 功能
+平台向 OpenRouter/大模型厂商 按原价采购
+    ↓ 加价策略
+平台售价 = 原价 × (1.3 ~ 2.0)  // 30%-100% 加价，视模型和套餐
+    ↓ 差价即利润
+平台毛利 = 售价 - 采购成本
+```
+
+**套餐设计**：
+| 套餐 | 价格 | Token 额度 | 模型权限 | 有效期 |
+|------|------|-----------|---------|--------|
+| 试用 | 免费 | 10万 token | 免费模型 | 永久 |
+| 基础 | ¥29/月 | 500万 token | 标准模型 | 月度 |
+| 专业 | ¥99/月 | 2000万 token | 高级模型 | 月度 |
+| 团队 | ¥299/月 | 1亿 token | 全部模型 | 月度 |
+| 年付 | 8折优惠 | 同上 | 同上 | 年度 |
+
+### 11.3 用户数据变现（合规前提）
+
+**数据类型与价值**：
+| 数据类型 | 用途 | 变现方式 |
+|----------|------|---------|
+| 匿名化选股偏好 | 行为数据分析 | 卖给量化研究机构 |
+| 聚合持仓分布 | 市场情绪指标 | 作为平台增值数据产品销售 |
+| 策略绩效数据 | 策略评级依据 | 提升策略广场信誉 |
+| 匿名化交易信号 | 量化因子研究 | 与学术机构/券商合作 |
+
+**合规要求**（必须满足）：
+- 用户注册时明确告知数据使用方式并获得同意
+- 数据脱敏处理，不包含个人身份信息
+- 用户可在设置页关闭数据共享（并说明关闭后的功能影响）
+- 遵守《数据安全法》《个人信息保护法》
+
+### 11.4 模型选择器前端组件
+
+```jsx
+/**
+ * AI 模型选择器组件
+ * 供 TradingAgents 选股、Kronos分析等 AI 功能复用
+ * 
+ * Props:
+ * - selectedModel: string - 当前选中模型ID
+ * - onSelect: function - 选中回调
+ * - userBalance: number - 用户余额（显示预计消耗）
+ * - feature: string - 当前功能（"screening"/"analysis"/"news"）
+ */
+
+const MODEL_CATALOG = [
+  {
+    id: "stepfun/step-3.5-flash:free",
+    name: "StepFun Flash",
+    badge: "免费",
+    badgeColor: "#48bb78",
+    desc: "适合体验，速度快",
+    tokenCost: 0,        // 每次选股消耗的平台 token 估算
+    quality: 3           // 1-5星
+  },
+  {
+    id: "deepseek/deepseek-v3.2",
+    name: "DeepSeek V3",
+    badge: "标准",
+    badgeColor: "#4299e1",
+    desc: "性价比最高，日常使用",
+    tokenCost: 15000,
+    quality: 4
+  },
+  {
+    id: "anthropic/claude-sonnet-4-5",
+    name: "Claude Sonnet",
+    badge: "高级",
+    badgeColor: "#9f7aea",
+    desc: "分析深度更强",
+    tokenCost: 60000,
+    quality: 5
+  },
+  // 后续可动态从后端拉取模型列表
+];
+```
+
+### 11.5 Token 计量系统
+
+后端需要实现：
+```javascript
+// 每次 AI 调用记录 token 消耗
+// GET /api/usage/balance    用户余额查询
+// GET /api/usage/history    消耗记录
+// POST /api/usage/recharge  充值接口（接入支付）
+// POST /api/usage/deduct    内部扣减（AI调用时自动调用）
+```
+
+数据库新增：
+```sql
+-- 用户余额和充值记录
+CREATE TABLE user_tokens (
+    user_id TEXT PRIMARY KEY,
+    balance INTEGER DEFAULT 0,       -- 剩余 token 数
+    total_purchased INTEGER DEFAULT 0,
+    total_used INTEGER DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Token 消耗明细
+CREATE TABLE token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    feature TEXT,                    -- "screening"/"analysis"/"backtest"
+    model TEXT,                      -- 使用的模型
+    tokens_in INTEGER,               -- 输入 token 数
+    tokens_out INTEGER,              -- 输出 token 数
+    cost_tokens INTEGER,             -- 扣减平台 token 数
+    cost_usd REAL,                   -- 实际采购成本（USD）
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
