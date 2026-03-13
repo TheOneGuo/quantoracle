@@ -12,6 +12,8 @@
   padding: 12px 20px;
   background: #1a1f2e;
   border-bottom: 1px solid #2d3748;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .worldmonitor-back-btn {
@@ -23,16 +25,61 @@
   font-size: 14px;
   cursor: pointer;
   transition: background 0.2s;
+  flex-shrink: 0;
 }
 
 .worldmonitor-back-btn:hover {
   background: #2d3748;
 }
 
+.worldmonitor-header-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 200px;
+}
+
 .worldmonitor-title {
   font-size: 16px;
   font-weight: 600;
   color: #f7fafc;
+  margin-bottom: 4px;
+}
+
+.worldmonitor-subtitle {
+  font-size: 12px;
+  color: #a0aec0;
+  text-align: center;
+}
+
+.worldmonitor-tab-container {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.worldmonitor-tab {
+  padding: 8px 16px;
+  background: #2d3748;
+  border: none;
+  border-radius: 6px;
+  color: #cbd5e0;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.worldmonitor-tab:hover {
+  background: #4a5568;
+  color: #fff;
+}
+
+.worldmonitor-tab.active {
+  background: #667eea;
+  color: #fff;
 }
 
 .worldmonitor-content {
@@ -41,16 +88,12 @@
   position: relative;
 }
 
-.worldmonitor-loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #a0aec0;
-  font-size: 14px;
+.worldmonitor-tab-content {
+  width: 100%;
+  height: 100%;
 }
 
-.worldmonitor-content iframe {
+.worldmonitor-tab-content iframe {
   width: 100%;
   height: 100%;
   border: none;
