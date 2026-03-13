@@ -1,0 +1,34 @@
+# 加密密钥文件
+SECRETS.md
+*.enc
+*.key
+*.pem
+
+# 本地敏感配置
+.env
+.env.*
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# SQLite DB
+*.db
+*.sqlite

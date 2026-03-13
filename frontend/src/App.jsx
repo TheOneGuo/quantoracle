@@ -1,0 +1,1192 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
+import axios from 'axios'
+import StockChart from './components/StockChart'
+import HotStockAnalysis from './components/HotStockAnalysis'
+import TradeRuleMonitor from './components/TradeRuleMonitor'
+import CloudMap from './components/CloudMap'
+import WorldMonitor from './components/WorldMonitor'
+import './App.css'
+
+const API_BASE = 'http://localhost:3001/api'
+
+const MARKET_INDEXES = [
+  { code: 'sh000001', name: '上证指数' },
+  { code: 'sh000300', name: '沪深300' },
+  { code: 'sz399001', name: '深证成指' },
+  { code: 'sz399006', name: '创业板指' }
+]
+
+function App() {
+  const [marketData, setMarketData] = useState([])
+  const [holdings, setHoldings] = useState([])
+  const [alerts, setAlerts] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState(null)
+  const [smartAnalysis, setSmartAnalysis] = useState([])
+  const [smartAnalysisLoading, setSmartAnalysisLoading] = useState(false)
+  const [smartAnalysisUpdated, setSmartAnalysisUpdated] = useState(null)
+  const [analyzeLoading, setAnalyzeLoading] = useState(false)
+  const [analyzeMessage, setAnalyzeMessage] = useState(null)
+
+  const [stockCode, setStockCode] = useState('')
+  const [stockName, setStockName] = useState('')
+  const [buyPrice, setBuyPrice] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [buyDate, setBuyDate] = useState(new Date().toISOString().split('T')[0])
+  
+  // 卖出相关状态
+  const [tradeType, setTradeType] = useState('buy') // 'buy' | 'sell'
+  const [sellStockCode, setSellStockCode] = useState('')
+  const [sellStockName, setSellStockName] = useState('')
+  const [sellPrice, setSellPrice] = useState('')
+  const [sellQuantity, setSellQuantity] = useState('')
+  const [sellDate, setSellDate] = useState(new Date().toISOString().split('T')[0])
+  const [sellLoading, setSellLoading] = useState(false)
+  
+  // 页面切换状态
+  const [currentView, setCurrentView] = useState('main') // 'main' | 'analysis'
+
+  // 查询股票名称
+  const queryStockName = async (code) => {
+    if (!code || code.length < 6) return
+    // 自动添加前缀
+    let formattedCode = code
+    if (!code.startsWith('sh') && !code.startsWith('sz') && !code.startsWith('bj')) {
+      if (code.startsWith('6')) {
+        formattedCode = 'sh' + code
+      } else if (code.startsWith('0') || code.startsWith('3')) {
+        formattedCode = 'sz' + code
+      } else if (code.startsWith('8') || code.startsWith('4')) {
+        formattedCode = 'bj' + code
+      }
+    }
+    
+    try {
+      const res = await axios.get(`${API_BASE}/stock/${formattedCode}`)
+      if (res.data.success && res.data.data.name) {
+        setStockName(res.data.data.name)
+        // 同时更新代码为格式化后的代码
+        if (formattedCode !== code) {
+          setStockCode(formattedCode)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to query stock name:', error)
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (stockCode && stockCode.length >= 6) {
+        queryStockName(stockCode)
+      }
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [stockCode])
+
+  const fetchMarketData = useCallback(async () => {
+    try {
+      const codes = MARKET_INDEXES.map(i => i.code)
+      const res = await axios.post(`${API_BASE}/stocks/batch`, { codes })
+      const dataWithNames = res.data.data.map(item => {
+        const indexInfo = MARKET_INDEXES.find(i => i.code === item.code)
+        return { ...item, name: indexInfo?.name || item.name }
+      })
+      setMarketData(dataWithNames)
+    } catch (error) {
+      console.error('Failed to fetch market data:', error)
+    }
+  }, [])
+
+  const fetchHoldings = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/holdings`)
+      setHoldings(res.data.data)
+      setLastUpdated(new Date())
+      
+      const newAlerts = []
+      res.data.data.forEach(h => {
+        if (h.analysis && h.analysis.action !== 'HOLD') {
+          newAlerts.push({
+            id: `${h.code}-${Date.now()}`,
+            stock: h.name,
+            code: h.code,
+            action: h.analysis.actionDesc,
+            reason: h.analysis.reason,
+            priority: h.analysis.action === 'CLEAR' ? 'high' : 'medium'
+          })
+        }
+      })
+      setAlerts(newAlerts)
+    } catch (error) {
+      console.error('Failed to fetch holdings:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchMarketData()
+    fetchHoldings()
+    
+    // 请求浏览器通知权限
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+    
+    const interval = setInterval(() => {
+      fetchMarketData()
+      fetchHoldings()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [fetchMarketData, fetchHoldings])
+
+  const addHolding = async (e) => {
+    e.preventDefault()
+    if (!stockCode || !stockName || !buyPrice || !quantity) return
+    
+    setLoading(true)
+    try {
+      await axios.post(`${API_BASE}/holdings`, {
+        code: stockCode,
+        name: stockName,
+        trades: [{
+          buyPrice: parseFloat(buyPrice),
+          quantity: parseInt(quantity),
+          buyDate: buyDate
+        }]
+      })
+      
+      setStockCode('')
+      setStockName('')
+      setBuyPrice('')
+      setQuantity('')
+      setBuyDate(new Date().toISOString().split('T')[0])
+      
+      fetchHoldings()
+    } catch (error) {
+      alert('添加失败: ' + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const addTradeToHolding = async (code) => {
+    const price = prompt('请输入买入价格:')
+    const qty = prompt('请输入买入数量:')
+    if (price && qty) {
+      try {
+        await axios.post(`${API_BASE}/holdings/${code}/trades`, {
+          buyPrice: parseFloat(price),
+          quantity: parseInt(qty),
+          buyDate: new Date().toISOString().split('T')[0],
+          type: 'buy'
+        })
+        fetchHoldings()
+      } catch (error) {
+        alert('添加失败: ' + error.message)
+      }
+    }
+  }
+
+  // 卖出持仓 - 表单提交方式
+  const handleSellSubmit = async (e) => {
+    e.preventDefault()
+    if (!sellStockCode || !sellPrice || !sellQuantity) return
+    
+    const holding = holdings.find(h => h.code === sellStockCode)
+    if (!holding) {
+      alert('未找到该持仓')
+      return
+    }
+    
+    const summary = calculateSummary(holding)
+    const maxQty = summary.totalQty
+    const sellQty = parseInt(sellQuantity)
+    
+    if (sellQty <= 0 || sellQty > maxQty) {
+      alert(`卖出数量无效，最大可卖: ${maxQty}股`)
+      return
+    }
+    
+    setSellLoading(true)
+    try {
+      await axios.post(`${API_BASE}/holdings/${sellStockCode}/trades`, {
+        sellPrice: parseFloat(sellPrice),
+        quantity: sellQty,
+        sellDate: sellDate,
+        type: 'sell'
+      })
+      
+      // 重置表单
+      setSellStockCode('')
+      setSellStockName('')
+      setSellPrice('')
+      setSellQuantity('')
+      setSellDate(new Date().toISOString().split('T')[0])
+      
+      fetchHoldings()
+      setAnalyzeMessage({ type: 'success', text: `成功卖出 ${holding.name} ${sellQty}股 @ ¥${sellPrice}` })
+      setTimeout(() => setAnalyzeMessage(null), 3000)
+    } catch (error) {
+      alert('卖出失败: ' + error.message)
+    } finally {
+      setSellLoading(false)
+    }
+  }
+
+  // 快速卖出（从持仓卡片）
+  const sellHolding = async (holding) => {
+    const summary = calculateSummary(holding)
+    const maxQty = summary.totalQty
+    
+    if (maxQty <= 0) {
+      alert('当前没有可卖出的持仓')
+      return
+    }
+    
+    // 切换到卖出表单并预填充
+    setTradeType('sell')
+    setSellStockCode(holding.code)
+    setSellStockName(holding.name)
+    setSellPrice(holding.currentData?.current?.toFixed(2) || '')
+    setSellQuantity(maxQty.toString())
+    
+    // 滚动到右侧表单
+    document.querySelector('.config-section')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const deleteHolding = async (code) => {
+    if (confirm('确定删除这个持仓吗？')) {
+      try {
+        await axios.delete(`${API_BASE}/holdings/${code}`)
+        fetchHoldings()
+      } catch (error) {
+        alert('删除失败: ' + error.message)
+      }
+    }
+  }
+
+  const deleteTrade = async (tradeId) => {
+    if (confirm('确定删除这条交易记录吗？')) {
+      try {
+        await axios.delete(`${API_BASE}/trades/${tradeId}`)
+        // 删除后重新获取持仓并触发交易规则分析
+        await fetchHoldings()
+        // 强制重新分析所有持仓以更新预警
+        await analyzeAllHoldings()
+      } catch (error) {
+        alert('删除失败: ' + error.message)
+      }
+    }
+  }
+
+  // 手动触发所有持仓的交易规则分析
+  const analyzeAllHoldings = async () => {
+    if (holdings.length === 0) {
+      setAnalyzeMessage({ type: 'warning', text: '暂无持仓，请先添加股票' })
+      setTimeout(() => setAnalyzeMessage(null), 3000)
+      return
+    }
+
+    setAnalyzeLoading(true)
+    setAnalyzeMessage({ type: 'info', text: '正在分析...' })
+
+    try {
+      const codes = holdings.map(h => h.code)
+      const stockData = await axios.post(`${API_BASE}/stocks/batch`, { codes })
+
+      const newAlerts = []
+      holdings.forEach(holding => {
+        const stock = stockData.data.data.find(s => s.code === holding.code)
+        if (stock && holding.analysis && holding.analysis.action !== 'HOLD') {
+          newAlerts.push({
+            id: `${holding.code}-${Date.now()}`,
+            stock: holding.name,
+            code: holding.code,
+            action: holding.analysis.actionDesc,
+            reason: holding.analysis.reason,
+            priority: holding.analysis.action === 'CLEAR' ? 'high' : 'medium'
+          })
+        }
+      })
+
+      setAlerts(newAlerts)
+      if (newAlerts.length === 0) {
+        setAnalyzeMessage({ type: 'success', text: '分析完成！当前所有持仓均无需操作，继续持有即可' })
+      } else {
+        setAnalyzeMessage({ type: 'success', text: `分析完成！发现 ${newAlerts.length} 条预警` })
+      }
+    } catch (error) {
+      console.error('分析失败:', error)
+      setAnalyzeMessage({ type: 'error', text: '分析失败: ' + error.message })
+    } finally {
+      setAnalyzeLoading(false)
+      setTimeout(() => setAnalyzeMessage(null), 5000)
+    }
+  }
+
+  // 获取智能分析数据
+  const fetchSmartAnalysis = useCallback(async () => {
+    if (holdings.length === 0) return
+
+    setSmartAnalysisLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/smart-analyze/holdings`)
+      if (res.data.success) {
+        setSmartAnalysis(res.data.data)
+        setSmartAnalysisUpdated(new Date())
+      }
+    } catch (error) {
+      console.error('Failed to fetch smart analysis:', error)
+    } finally {
+      setSmartAnalysisLoading(false)
+    }
+  }, [holdings])
+
+  // 当持仓变化时，自动获取智能分析
+  useEffect(() => {
+    if (holdings.length > 0) {
+      fetchSmartAnalysis()
+    }
+  }, [holdings, fetchSmartAnalysis])
+
+  const calculateSummary = (holding) => {
+    const trades = holding.trades || []
+
+    // 分离买入和卖出记录
+    const buyTrades = trades.filter(t => t.type !== 'sell')
+    const sellTrades = trades.filter(t => t.type === 'sell')
+
+    // 计算总买入成本和数量（综合成本）
+    const totalBuyCost = buyTrades.reduce((sum, t) => sum + (t.buyPrice || 0) * t.quantity, 0)
+    const totalBuyQty = buyTrades.reduce((sum, t) => sum + t.quantity, 0)
+
+    // 计算总卖出数量
+    const totalSellQty = sellTrades.reduce((sum, t) => sum + t.quantity, 0)
+
+    // 当前持仓数量 = 买入 - 卖出
+    const totalQty = totalBuyQty - totalSellQty
+
+    // 平均成本 = 总买入成本 / 总买入数量（综合买入价格的均值，不随卖出改变）
+    const avgCost = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : 0
+
+    // 当前持仓成本 = 平均成本 × 当前持仓数量
+    const totalCost = avgCost * totalQty
+
+    // 当前市值
+    const currentValue = holding.currentData?.current * totalQty
+
+    // 总盈亏 = 当前市值 - 当前持仓成本
+    const profit = currentValue - totalCost
+
+    const profitPercent = totalCost > 0 ? (profit / totalCost) * 100 : 0
+
+    return {
+      totalCost,
+      totalQty,
+      avgCost,
+      currentValue,
+      profit,
+      profitPercent,
+      totalBuyQty,
+      totalSellQty
+    }
+  }
+
+  const getActionClass = (action) => {
+    switch (action) {
+      case 'BUY': return 'action-buy'
+      case 'SELL': return 'action-sell'
+      case 'CLEAR': return 'action-clear'
+      default: return 'action-hold'
+    }
+  }
+
+  const getActionText = (action) => {
+    switch (action) {
+      case 'BUY': return '买入'
+      case 'SELL': return '减仓'
+      case 'CLEAR': return '清仓'
+      default: return '持有'
+    }
+  }
+
+  // 生成波浪线路径
+  const generateWavePath = (width, height, amplitude, frequency, phase = 0) => {
+    let path = `M 0 ${height / 2}`
+    const points = 50
+    for (let i = 0; i <= points; i++) {
+      const x = (i / points) * width
+      const y = height / 2 + Math.sin((i / points) * frequency * Math.PI * 2 + phase) * amplitude
+      path += ` L ${x} ${y}`
+    }
+    return path
+  }
+
+  // 渲染智能分析板块
+  const renderSmartAnalysis = () => {
+    return (
+      <div className="panel smart-analysis-section">
+        <div className="panel-header">
+          <h3>🤖 智能分析</h3>
+          <div className="header-actions">
+            {smartAnalysisUpdated && (
+              <span className="refresh-time">
+                更新于 {smartAnalysisUpdated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+            {smartAnalysisLoading && <span className="loading-text">分析中...</span>}
+            <button
+              className="btn-refresh"
+              onClick={fetchSmartAnalysis}
+              disabled={smartAnalysisLoading}
+              title="刷新分析"
+            >
+              🔄
+            </button>
+          </div>
+        </div>
+        <div className="smart-analysis-list">
+          {smartAnalysis.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">🤖</div>
+              <p>暂无智能分析</p>
+              <span>添加持仓后将自动分析</span>
+            </div>
+          ) : (
+            smartAnalysis.map(item => (
+            <div key={item.code} className="smart-analysis-card">
+              <div className="smart-header">
+                <div className="smart-stock-info">
+                  <span className="smart-stock-name">{item.name}</span>
+                  <span className="smart-stock-code">{item.code}</span>
+                </div>
+                <div className="smart-score">
+                  <span className="score-label">评分</span>
+                  <span className={`score-value ${item.insight.score >= 60 ? 'high' : item.insight.score >= 40 ? 'medium' : 'low'}`}>
+                    {item.insight.score}
+                  </span>
+                </div>
+              </div>
+
+              {/* 股票走势图 */}
+              <StockChart code={item.code} name={item.name} />
+
+              {/* 信号标签 */}
+              <div className="smart-signals">
+                {item.insight.signals.map((signal, idx) => (
+                  <span key={idx} className={`signal-tag ${signal.type}`}>
+                    {signal.text}
+                  </span>
+                ))}
+              </div>
+
+              {/* 核心结论 */}
+              <div className="smart-insight">
+                <p>{item.insight.summary}</p>
+              </div>
+
+              {/* 技术数据 */}
+              <div className="smart-technical">
+                <div className="tech-item">
+                  <span className="tech-label">涨跌</span>
+                  <span className={`tech-value ${item.technical.changePercent >= 0 ? 'up' : 'down'}`}>
+                    {item.technical.changePercent >= 0 ? '+' : ''}{item.technical.changePercent.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="tech-item">
+                  <span className="tech-label">振幅</span>
+                  <span className="tech-value">{item.technical.amplitude.toFixed(2)}%</span>
+                </div>
+                {item.technical.costChangePercent !== null && (
+                  <div className="tech-item">
+                    <span className="tech-label">持仓盈亏</span>
+                    <span className={`tech-value ${item.technical.costChangePercent >= 0 ? 'up' : 'down'}`}>
+                      {item.technical.costChangePercent >= 0 ? '+' : ''}{item.technical.costChangePercent.toFixed(1)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* 检查清单 */}
+              <div className="smart-checklist">
+                {item.checklist.map((check, idx) => (
+                  <div key={idx} className={`check-item ${check.status}`}>
+                    <span className="check-dot"></span>
+                    <span className="check-label">{check.item}</span>
+                    <span className="check-detail">{check.detail}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* 操作建议 */}
+              <div className={`smart-suggestion ${item.insight.suggestion}`}>
+                <span className="suggestion-label">建议</span>
+                <span className="suggestion-text">{item.insight.suggestionText}</span>
+              </div>
+            </div>
+          ))
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // 渲染买卖点可视化
+  const renderTradePoints = () => {
+    return (
+      <div className="panel tradepoints-section">
+        <div className="panel-header">
+          <h3>📍 买卖点标记</h3>
+          <span className="subtitle">追踪买入卖出节点</span>
+        </div>
+        {holdings.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📍</div>
+            <p>暂无买卖点记录</p>
+            <span>添加持仓后将显示交易节点</span>
+          </div>
+        ) : (
+        <div className="tradepoints-list">
+          {holdings.map(holding => {
+            const summary = calculateSummary(holding)
+            const currentPrice = holding.currentData?.current || 0
+            const avgCost = summary.avgCost
+            const changePercent = ((currentPrice - avgCost) / avgCost) * 100
+            
+            // 分离买入和卖出记录
+            const buyTrades = holding.trades?.filter(t => t.type !== 'sell') || []
+            const sellTrades = holding.trades?.filter(t => t.type === 'sell') || []
+            
+            // 计算价格范围
+            const allPrices = [
+              ...buyTrades.map(t => t.buyPrice),
+              ...sellTrades.map(t => t.sellPrice),
+              currentPrice, avgCost
+            ].filter(Boolean)
+            const maxPrice = Math.max(...allPrices) * 1.05
+            const minPrice = Math.min(...allPrices) * 0.95
+            const range = maxPrice - minPrice || 1
+            
+            // 计算位置百分比
+            const getPosition = (price) => ((price - minPrice) / range) * 100
+            
+            // 按日期排序的交易记录
+            const sortedTrades = [...(holding.trades || [])].sort((a, b) => new Date(a.buyDate || a.sellDate) - new Date(b.buyDate || b.sellDate))
+            
+            return (
+              <div key={holding.code} className="tradepoint-card">
+                <div className="tradepoint-header">
+                  <span className="stock-name">{holding.name}</span>
+                  <span className="stock-code">{holding.code}</span>
+                  <span className={`change-badge ${changePercent >= 0 ? 'up' : 'down'}`}>
+                    {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(1)}%
+                  </span>
+                </div>
+                
+                {/* 持仓摘要 */}
+                <div className="holding-summary">
+                  <div className="summary-item">
+                    <label>当前持仓</label>
+                    <value>{summary.totalQty}股</value>
+                  </div>
+                  <div className="summary-item">
+                    <label>平均成本</label>
+                    <value>¥{avgCost.toFixed(2)}</value>
+                  </div>
+                  <div className="summary-item">
+                    <label>总盈亏</label>
+                    <value className={summary.profit >= 0 ? 'up' : 'down'}>
+                      {summary.profit >= 0 ? '+' : ''}¥{summary.profit?.toLocaleString()}
+                    </value>
+                  </div>
+                </div>
+                
+                {/* 波浪走势图 */}
+                <div className="wave-chart">
+                  <svg viewBox="0 0 300 100" preserveAspectRatio="none" className="wave-svg">
+                    {/* 背景网格 */}
+                    <defs>
+                      <pattern id={`grid-${holding.code}`} width="30" height="20" patternUnits="userSpaceOnUse">
+                        <path d="M 30 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+                      </pattern>
+                    </defs>
+                    <rect width="300" height="100" fill={`url(#grid-${holding.code})`} />
+                    
+                    {/* 价格区域填充 */}
+                    <path
+                      d={`M 0 ${100 - getPosition(currentPrice)} 
+                          Q 75 ${100 - getPosition(avgCost * 1.02)} 150 ${100 - getPosition(avgCost)} 
+                          T 300 ${100 - getPosition(currentPrice)}
+                          L 300 100 L 0 100 Z`}
+                      fill={changePercent >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)'}
+                    />
+                    
+                    {/* 波浪线 - 价格走势 */}
+                    <path
+                      d={`M 0 ${100 - getPosition(sortedTrades[0]?.buyPrice || sortedTrades[0]?.sellPrice || avgCost)} 
+                          C 50 ${100 - getPosition(sortedTrades[0]?.buyPrice || sortedTrades[0]?.sellPrice || avgCost)}, 
+                            100 ${100 - getPosition(sortedTrades[Math.floor(sortedTrades.length/3)]?.buyPrice || sortedTrades[Math.floor(sortedTrades.length/3)]?.sellPrice || avgCost)}, 
+                            150 ${100 - getPosition(avgCost)}
+                          S 250 ${100 - getPosition(sortedTrades[Math.floor(sortedTrades.length*2/3)]?.buyPrice || sortedTrades[Math.floor(sortedTrades.length*2/3)]?.sellPrice || avgCost)}, 
+                            300 ${100 - getPosition(currentPrice)}`}
+                      fill="none"
+                      stroke={changePercent >= 0 ? '#48bb78' : '#f56565'}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    
+                    {/* 买入点标记 - 绿色 */}
+                    {buyTrades.map((trade, idx) => {
+                      const x = ((idx + 1) / (sortedTrades.length + 1)) * 300
+                      const y = 100 - getPosition(trade.buyPrice)
+                      return (
+                        <g key={trade.id}>
+                          <circle cx={x} cy={y} r="4" fill="#38a169" stroke="white" strokeWidth="2"/>
+                          <title>买入 #{idx + 1}: ¥{trade.buyPrice.toFixed(2)} ({trade.buyDate}) {trade.quantity}股</title>
+                        </g>
+                      )
+                    })}
+                    
+                    {/* 卖出点标记 - 红色 */}
+                    {sellTrades.map((trade, idx) => {
+                      const x = ((buyTrades.length + idx + 1) / (sortedTrades.length + 1)) * 300
+                      const y = 100 - getPosition(trade.sellPrice)
+                      return (
+                        <g key={trade.id}>
+                          <circle cx={x} cy={y} r="4" fill="#e53e3e" stroke="white" strokeWidth="2"/>
+                          <title>卖出 #{idx + 1}: ¥{trade.sellPrice.toFixed(2)} ({trade.sellDate}) {trade.quantity}股</title>
+                        </g>
+                      )
+                    })}
+                    
+                    {/* 平均成本线 */}
+                    <line
+                      x1="0" y1={100 - getPosition(avgCost)}
+                      x2="300" y2={100 - getPosition(avgCost)}
+                      stroke="#ed8936"
+                      strokeWidth="1.5"
+                      strokeDasharray="5,5"
+                    />
+                    <text x="5" y={100 - getPosition(avgCost) - 5} fill="#ed8936" fontSize="8" fontWeight="600">
+                      成本 ¥{avgCost.toFixed(2)}
+                    </text>
+                    
+                    {/* 当前价格点 */}
+                    <circle cx="300" cy={100 - getPosition(currentPrice)} r="5" fill={changePercent >= 0 ? '#48bb78' : '#f56565'} stroke="white" strokeWidth="2"/>
+                    <text x="260" y={100 - getPosition(currentPrice) - 8} fill={changePercent >= 0 ? '#48bb78' : '#f56565'} fontSize="9" fontWeight="600" textAnchor="end">
+                      现价 ¥{currentPrice.toFixed(2)}
+                    </text>
+                  </svg>
+                  
+                  {/* 价格刻度 */}
+                  <div className="price-labels">
+                    <span className="price-high">¥{maxPrice.toFixed(0)}</span>
+                    <span className="price-low">¥{minPrice.toFixed(0)}</span>
+                  </div>
+                </div>
+                
+                {/* 交易记录 */}
+                <div className="trade-history-tabs">
+                  {/* 买入记录 */}
+                  <div className="trade-section">
+                    <div className="trade-section-header buy">
+                      <span>📥 买入记录</span>
+                      <span className="count">{buyTrades.length}笔</span>
+                    </div>
+                    <div className="trade-list">
+                      {[...buyTrades]?.sort((a, b) => new Date(b.buyDate) - new Date(a.buyDate)).map((trade, idx) => (
+                        <div key={trade.id} className="trade-tag buy">
+                          <span className="trade-num">#{buyTrades.length - idx}</span>
+                          <span className="price">¥{trade.buyPrice}</span>
+                          <span className="qty">{trade.quantity}股</span>
+                          <span className="date">{trade.buyDate}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  {/* 卖出记录 */}
+                  <div className="trade-section">
+                    <div className="trade-section-header sell">
+                      <span>📤 卖出记录</span>
+                      <span className="count">{sellTrades.length}笔</span>
+                    </div>
+                    <div className="trade-list">
+                      {[...sellTrades]?.sort((a, b) => new Date(b.sellDate) - new Date(a.sellDate)).map((trade, idx) => (
+                        <div key={trade.id} className="trade-tag sell">
+                          <span className="trade-num">#{sellTrades.length - idx}</span>
+                          <span className="price">¥{trade.sellPrice}</span>
+                          <span className="qty">{trade.quantity}股</span>
+                          <span className="date">{trade.sellDate}</span>
+                          {trade.profit && (
+                            <span className={`profit ${trade.profit >= 0 ? 'up' : 'down'}`}>
+                              {trade.profit >= 0 ? '+' : ''}¥{trade.profit}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      {sellTrades.length === 0 && (
+                        <div className="empty-trade">暂无卖出记录</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        )}
+      </div>
+    )
+  }
+
+  // 渲染主视图
+  const renderMainView = () => (
+    <div className="main-container">
+      {/* 左侧：智能分析 */}
+      <div className="left-column">
+        {/* 智能分析板块 */}
+        {renderSmartAnalysis()}
+      </div>
+
+      {/* 中间列：持仓列表 + 交易规则监控 + 交易规则 */}
+      <div className="middle-column">
+        <div className="panel holdings-section">
+          <div className="panel-header">
+            <h3>我的持仓 
+              {holdings.length > 0 && (() => {
+                let totalProfit = 0;
+                let totalCost = 0;
+                holdings.forEach(h => {
+                  const s = calculateSummary(h);
+                  totalProfit += s.profit;
+                  totalCost += s.totalCost;
+                });
+                const profitPercent = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
+                const isProfit = totalProfit >= 0;
+                return <span style={{ color: isProfit ? '#48bb78' : '#f56565', marginLeft: 8, fontSize: 14 }}>
+                  {isProfit ? '+' : ''}{totalProfit.toFixed(0)} ({isProfit ? '+' : ''}{profitPercent.toFixed(1)}%)
+                </span>;
+              })()}
+            </h3>
+            <div className="header-meta">
+              <span className="count">{holdings.length} 只</span>
+              {lastUpdated && (
+                <span className="refresh-time">
+                  更新于 {lastUpdated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </div>
+          </div>
+          
+          <div className="holdings-list">
+            {holdings.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">💼</div>
+                <p>暂无持仓</p>
+                <span>在右侧添加您的第一只股票</span>
+              </div>
+            ) : (
+              holdings.map(holding => {
+                const summary = calculateSummary(holding)
+                const isProfit = summary.profit >= 0
+                
+                return (
+                  <div key={holding.code} className="holding-card">
+                    <div className="card-header">
+                      <div className="stock-title">
+                        <span className="stock-name">{holding.name}</span>
+                        <span className="stock-code">{holding.code}</span>
+                      </div>
+                      <div className="header-badges">
+                        <div className={`combined-badge ${isProfit ? 'profit' : 'loss'}`}>
+                          <span className="badge-item day-change">
+                            今日{holding.currentData?.changePercent >= 0 ? '+' : ''}{holding.currentData?.changePercent?.toFixed(2)}%
+                          </span>
+                          <span className="badge-divider">|</span>
+                          <span className="badge-item total-profit">
+                            总盈亏{isProfit ? '+' : ''}{summary.profitPercent.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="price-row">
+                      <div className="price-item">
+                        <label>现价</label>
+                        <value className={holding.currentData?.changePercent >= 0 ? 'up' : 'down'}>
+                          ¥{holding.currentData?.current?.toFixed(2)}
+                        </value>
+                      </div>
+                      <div className="price-item">
+                        <label>成本</label>
+                        <value>¥{summary.avgCost.toFixed(2)}</value>
+                      </div>
+                      <div className="price-item">
+                        <label>持仓</label>
+                        <value>{summary.totalQty}股</value>
+                      </div>
+                    </div>
+
+                    <div className="profit-row">
+                      <div className="profit-item">
+                        <label>盈亏金额</label>
+                        <value className={isProfit ? 'up' : 'down'}>
+                          {isProfit ? '+' : ''}¥{summary.profit?.toLocaleString()}
+                        </value>
+                      </div>
+                      <div className="profit-item">
+                        <label>市值</label>
+                        <value>¥{summary.currentValue?.toLocaleString()}</value>
+                      </div>
+                    </div>
+                    
+                    {holding.analysis && holding.analysis.action !== 'HOLD' && (
+                      <div className={`signal ${getActionClass(holding.analysis.action)}`}>
+                        <span className="signal-icon">
+                          {holding.analysis.action === 'CLEAR' ? '⚠️' : 
+                           holding.analysis.action === 'BUY' ? '💚' : '💛'}
+                        </span>
+                        <span className="signal-text">{holding.analysis.reason}</span>
+                      </div>
+                    )}
+                    
+                    <div className="card-actions">
+                      <button className="btn-add" onClick={() => addTradeToHolding(holding.code)}>
+                        + 追加
+                      </button>
+                      <button className="btn-sell" onClick={() => sellHolding(holding)}>
+                        卖出
+                      </button>
+                      <button className="btn-delete" onClick={() => deleteHolding(holding.code)}>
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+        
+        {/* 交易规则实时监控 */}
+        <TradeRuleMonitor 
+          holdings={holdings} 
+          onAlert={(newAlerts) => {
+            // 新预警触发时显示通知
+            newAlerts.forEach(alert => {
+              // 浏览器通知
+              if (Notification.permission === 'granted') {
+                new Notification('交易规则预警', {
+                  body: `${alert.stockName} ${alert.actionText}: ${alert.message}`,
+                  icon: '⚠️'
+                });
+              }
+            });
+          }}
+        />
+
+        {/* 交易规则 */}
+        <div className="rules-panel">
+          <h3>交易规则</h3>
+          <div className="rules-grid">
+            <div className="rule-box">
+              <h4>📉 下跌应对</h4>
+              <ul>
+                <li><span className="tag hold">持有</span> 5-10% 不动</li>
+                <li><span className="tag watch">观察</span> 15% 看5日线</li>
+                <li><span className="tag watch">观察</span> 20% 看10日线</li>
+                <li><span className="tag watch">观察</span> 25% 看20日线</li>
+                <li><span className="tag clear">清仓</span> 30%+ 无条件</li>
+              </ul>
+            </div>
+            <div className="rule-box">
+              <h4>📈 上涨止盈</h4>
+              <ul>
+                <li><span className="tag hold">持有</span> 10-20% 不动</li>
+                <li><span className="tag sell">减仓</span> 30% 减50%</li>
+                <li><span className="tag sell">减仓</span> 40% 再减30%</li>
+                <li><span className="tag clear">清仓</span> 50% 全清</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 右侧：交易操作 + 买卖点标记 */}
+      <div className="panel config-section">
+        <div className="add-form">
+          <h3>交易操作</h3>
+          
+          {/* 操作类型切换 */}
+          <div className="trade-type-tabs">
+            <button 
+              className={tradeType === 'buy' ? 'active' : ''} 
+              onClick={() => setTradeType('buy')}
+            >
+              📥 买入
+            </button>
+            <button 
+              className={tradeType === 'sell' ? 'active' : ''} 
+              onClick={() => setTradeType('sell')}
+            >
+              📤 卖出
+            </button>
+          </div>
+          
+          {tradeType === 'buy' ? (
+            /* 买入表单 */
+            <form onSubmit={addHolding}>
+              <div className="input-group">
+                <label>股票代码</label>
+                <input 
+                  value={stockCode}
+                  onChange={e => setStockCode(e.target.value)}
+                  placeholder="如: sh600519"
+                  required
+                />
+              </div>
+              <div className="input-group">
+                <label>股票名称</label>
+                <input 
+                  value={stockName}
+                  onChange={e => setStockName(e.target.value)}
+                  placeholder="自动识别"
+                  required
+                />
+              </div>
+              <div className="input-row">
+                <div className="input-group">
+                  <label>买入价</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    value={buyPrice}
+                    onChange={e => setBuyPrice(e.target.value)}
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <label>数量</label>
+                  <input 
+                    type="number"
+                    value={quantity}
+                    onChange={e => setQuantity(e.target.value)}
+                    placeholder="0"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="input-group">
+                <label>买入日期</label>
+                <input 
+                  type="date"
+                  value={buyDate}
+                  onChange={e => setBuyDate(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn-submit buy" disabled={loading}>
+                {loading ? '添加中...' : '✓ 确认买入'}
+              </button>
+            </form>
+          ) : (
+            /* 卖出表单 */
+            <form onSubmit={handleSellSubmit}>
+              <div className="input-group">
+                <label>选择持仓</label>
+                <select 
+                  value={sellStockCode}
+                  onChange={e => {
+                    setSellStockCode(e.target.value);
+                    const holding = holdings.find(h => h.code === e.target.value);
+                    if (holding) {
+                      setSellStockName(holding.name);
+                      setSellPrice(holding.currentData?.current?.toFixed(2) || '');
+                      const maxQty = calculateSummary(holding).totalQty;
+                      setSellQuantity(maxQty.toString());
+                    } else {
+                      setSellPrice('');
+                      setSellQuantity('');
+                    }
+                  }}
+                  required
+                >
+                  <option value="">请选择要卖出的股票</option>
+                  {holdings.filter(h => calculateSummary(h).totalQty > 0).map(holding => {
+                    const summary = calculateSummary(holding);
+                    return (
+                      <option key={holding.code} value={holding.code}>
+                        {holding.name} ({holding.code}) - 持仓{summary.totalQty}股 - 成本¥{summary.avgCost.toFixed(2)}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              
+              <div className="input-row">
+                <div className="input-group">
+                  <label>卖出价 {sellStockCode && holdings.find(h => h.code === sellStockCode)?.currentData && (
+                    <small style={{color: '#64748b', marginLeft: '8px'}}>
+                      现价: ¥{holdings.find(h => h.code === sellStockCode).currentData.current.toFixed(2)}
+                    </small>
+                  )}</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    value={sellPrice}
+                    onChange={e => setSellPrice(e.target.value)}
+                    placeholder={sellStockCode ? "输入卖出价格" : "请先选择持仓"}
+                    disabled={!sellStockCode}
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <label>数量 {sellStockCode && (
+                    <small style={{color: '#64748b', marginLeft: '8px'}}>
+                      可卖: {(() => {
+                        const h = holdings.find(h => h.code === sellStockCode);
+                        return h ? calculateSummary(h).totalQty : 0;
+                      })()}股
+                    </small>
+                  )}</label>
+                  <input 
+                    type="number"
+                    value={sellQuantity}
+                    onChange={e => setSellQuantity(e.target.value)}
+                    placeholder={sellStockCode ? "输入卖出数量" : "请先选择持仓"}
+                    disabled={!sellStockCode}
+                    required
+                  />
+                </div>
+              </div>
+              
+              {/* 显示预估盈亏 */}
+              {sellStockCode && sellPrice && sellQuantity && (() => {
+                const holding = holdings.find(h => h.code === sellStockCode);
+                if (!holding) return null;
+                const avgCost = calculateSummary(holding).avgCost;
+                const profit = (parseFloat(sellPrice) - avgCost) * parseInt(sellQuantity);
+                return (
+                  <div className={`estimate-profit ${profit >= 0 ? 'up' : 'down'}`}>
+                    预估盈亏: {profit >= 0 ? '+' : ''}¥{profit.toLocaleString()} ({((profit / (avgCost * parseInt(sellQuantity))) * 100).toFixed(2)}%)
+                  </div>
+                );
+              })()}
+              
+              <div className="input-group">
+                <label>卖出日期</label>
+                <input 
+                  type="date"
+                  value={sellDate}
+                  onChange={e => setSellDate(e.target.value)}
+                  required
+                />
+              </div>
+              
+              <button type="submit" className="btn-submit sell" disabled={sellLoading || !sellStockCode}>
+                {sellLoading ? '卖出中...' : '✓ 确认卖出'}
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* 买卖点标记板块 */}
+        {renderTradePoints()}
+      </div>
+    </div>
+  )
+
+  // 导航到分析页面
+  const navigate = useNavigate()
+  const location = useLocation()
+  
+  const goToAnalysis = () => {
+    navigate('/analysis')
+  }
+  
+  const goToCloudMap = () => {
+    navigate('/cloudmap')
+  }
+  
+  const goToHome = () => {
+    navigate('/')
+  }
+
+  return (
+    <div className="app">
+      {/* 顶部导航 */}
+      <header className="header">
+        <div className="logo" style={{ cursor: 'pointer' }} onClick={goToHome}>
+          <span className="icon">📈</span>
+          <span className="title">智能股票管家</span>
+          <span className="slogan">助你买在无人问津处，卖在人声鼎沸时</span>
+        </div>
+        <div className="market-ticker">
+          {marketData.map(m => (
+            <span key={m.code} className="ticker-item">
+              {m.name}
+              <span className={m.change >= 0 ? 'up' : 'down'}>
+                {m.current?.toFixed(0)} ({m.changePercent > 0 ? '+' : ''}{m.changePercent?.toFixed(1)}%)
+              </span>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={goToCloudMap}
+            style={{ background: '#e53e3e' }}
+          >
+            📊 大盘云图
+          </button>
+          {location.pathname === '/' ? (
+            <button
+              className="btn-hot-stock-analysis"
+              onClick={goToAnalysis}
+            >
+              🔥 爆款投资股票分析
+            </button>
+          ) : location.pathname === '/cloudmap' ? (
+            <button
+              className="btn-hot-stock-analysis"
+              onClick={goToHome}
+            >
+              ← 返回首页
+            </button>
+          ) : (
+            <button
+              className="btn-hot-stock-analysis"
+              onClick={goToHome}
+            >
+              ← 返回首页
+            </button>
+          )}
+        </div>
+      </header>
+
+      <Routes>
+        <Route path="/" element={renderMainView()} />
+        <Route path="/analysis" element={
+          <HotStockAnalysis 
+            onBack={goToHome} 
+            holdings={holdings}
+            onAddToHoldings={(stock) => {
+              setStockCode(stock.code);
+              setStockName(stock.name);
+              setBuyPrice(stock.currentPrice.toString());
+              setQuantity('100');
+              goToHome();
+              setAnalyzeMessage({ type: 'success', text: `已添加 ${stock.name} 到持仓表单，请确认添加` });
+            }}
+          />
+        } />
+        <Route path="/cloudmap" element={<CloudMap />} />
+      </Routes>
+    </div>
+  )
+}
+
+export default App

@@ -1,0 +1,1710 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #111827;
+  --bg-card: #1a1f2e;
+  --bg-hover: #242b3d;
+  --border-color: #2d3748;
+  --text-primary: #f7fafc;
+  --text-secondary: #a0aec0;
+  --text-muted: #718096;
+  --color-up: #48bb78;
+  --color-down: #f56565;
+  --color-buy: #38a169;
+  --color-sell: #ed8936;
+  --color-clear: #e53e3e;
+  --color-hold: #4299e1;
+  --accent: #667eea;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo .icon {
+  font-size: 24px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo .title {
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.logo .slogan {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  padding: 4px 12px;
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 20px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.market-ticker {
+  display: flex;
+  gap: 24px;
+}
+
+.ticker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ticker-item span {
+  font-weight: 500;
+}
+
+/* Main Container */
+.main-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px 300px;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+  max-height: calc(100vh - 80px);
+}
+
+/* 中间列布局 - 现在放持仓、交易规则和买卖点 */
+.middle-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  height: 100%;
+}
+
+.middle-column .holdings-section {
+  flex: 0 0 auto;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.middle-column .holdings-list {
+  flex: 1;
+  overflow-y: visible;
+  padding: 12px;
+  max-height: none;
+}
+
+/* 中间列的交易规则监控 */
+.middle-column .monitor-panel {
+  flex: 0 0 auto;
+  max-height: 30%;
+}
+
+/* 中间列的交易规则 */
+.middle-column .rules-panel {
+  flex: 0 0 auto;
+  max-height: 25%;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.middle-column .rules-panel h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+
+.middle-column .rules-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.middle-column .rule-box {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+}
+
+.middle-column .rule-box h4 {
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.middle-column .rule-box ul {
+  list-style: none;
+}
+
+.middle-column .rule-box li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* Panel */
+.panel {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 右侧配置面板 */
+.config-section {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 配置区域中的买卖点标记不需要最大高度限制 */
+.config-section .tradepoints-section {
+  max-height: none;
+}
+
+.panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.panel-header .count {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.panel-header .header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-header .refresh-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.alert-badge {
+  background: var(--color-clear);
+  color: white;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-analyze {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-analyze:hover:not(:disabled) {
+  background: #5a67d8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+.btn-analyze:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 分析反馈消息 */
+.analyze-message {
+  padding: 10px 14px;
+  margin: 0 12px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+.analyze-message.success {
+  background: rgba(72, 187, 120, 0.15);
+  color: #48bb78;
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.analyze-message.warning {
+  background: rgba(237, 137, 54, 0.15);
+  color: #ed8936;
+  border: 1px solid rgba(237, 137, 54, 0.3);
+}
+
+.analyze-message.error {
+  background: rgba(229, 62, 62, 0.15);
+  color: #e53e3e;
+  border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.analyze-message.info {
+  background: rgba(102, 126, 234, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Holdings Section */
+.holdings-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.holdings-section .panel-header {
+  flex-shrink: 0;
+}
+
+.holdings-list {
+  flex: 0 0 auto;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: none;
+}
+
+.holding-card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s;
+}
+
+.holding-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.header-badges {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.combined-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-hover);
+}
+
+.combined-badge.profit {
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.combined-badge.loss {
+  border: 1px solid rgba(245, 101, 101, 0.3);
+}
+
+.badge-item {
+  white-space: nowrap;
+}
+
+.badge-item.day-change {
+  color: var(--text-secondary);
+}
+
+.combined-badge.profit .badge-item.total-profit {
+  color: #48bb78;
+}
+
+.combined-badge.loss .badge-item.total-profit {
+  color: #f56565;
+}
+
+.badge-divider {
+  color: var(--border-color);
+  font-weight: 400;
+}
+
+.stock-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stock-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stock-code {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.profit-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profit-badge.profit {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--color-up);
+}
+
+.profit-badge.loss {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--color-down);
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.price-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.price-item label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.price-item value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.profit-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+}
+
+.profit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profit-item label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.profit-item value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.signal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.signal.action-buy {
+  background: rgba(56, 161, 105, 0.15);
+  border: 1px solid rgba(56, 161, 105, 0.3);
+}
+
+.signal.action-sell {
+  background: rgba(237, 137, 54, 0.15);
+  border: 1px solid rgba(237, 137, 54, 0.3);
+}
+
+.signal.action-clear {
+  background: rgba(229, 62, 62, 0.15);
+  border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.signal-icon {
+  font-size: 16px;
+}
+
+.signal-text {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.card-actions button {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-add {
+  background: var(--color-buy);
+  color: white;
+}
+
+.btn-add:hover {
+  background: #2f855a;
+}
+
+.btn-delete {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.btn-delete:hover {
+  background: var(--color-clear);
+  color: white;
+}
+
+/* Alerts Section */
+.alerts-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.alerts-section .panel-header {
+  flex-shrink: 0;
+}
+
+.alerts-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.alert-card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 14px;
+  border-left: 3px solid var(--accent);
+}
+
+.alert-card.high {
+  border-left-color: var(--color-clear);
+  background: linear-gradient(90deg, rgba(229, 62, 62, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.alert-card.medium {
+  border-left-color: var(--color-sell);
+  background: linear-gradient(90deg, rgba(237, 137, 54, 0.1) 0%, var(--bg-card) 100%);
+}
+
+.alert-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.alert-stock {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alert-tag {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.alert-tag.action-buy {
+  background: var(--color-buy);
+  color: white;
+}
+
+.alert-tag.action-sell {
+  background: var(--color-sell);
+  color: white;
+}
+
+.alert-tag.action-clear {
+  background: var(--color-clear);
+  color: white;
+}
+
+.alert-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Config Section */
+.config-section {
+  overflow-y: auto;
+}
+
+.add-form {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.add-form h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+}
+
+.input-group {
+  margin-bottom: 12px;
+}
+
+.input-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.btn-submit {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Rules Panel */
+.rules-panel {
+  padding: 16px;
+}
+
+.rules-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.rule-box {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.rule-box h4 {
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-box ul {
+  list-style: none;
+}
+
+.rule-box li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tag {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: center;
+}
+
+.tag.hold {
+  background: rgba(66, 153, 225, 0.2);
+  color: var(--color-hold);
+}
+
+.tag.watch {
+  background: rgba(237, 137, 54, 0.2);
+  color: var(--color-sell);
+}
+
+.tag.clear {
+  background: rgba(229, 62, 62, 0.2);
+  color: var(--color-clear);
+}
+
+.tag.sell {
+  background: rgba(237, 137, 54, 0.2);
+  color: var(--color-sell);
+}
+
+/* Empty State */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.empty-state span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Colors */
+.up {
+  color: var(--color-up);
+}
+
+.down {
+  color: var(--color-down);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* 左侧列布局 - 现在放智能分析 */
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  height: 100%;
+}
+
+.left-column .smart-analysis-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.left-column .smart-analysis-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  gap: 10px;
+  align-content: start;
+}
+
+/* 买入点标记板块 */
+.buypoints-section {
+  flex: 0 0 auto;
+  max-height: 350px;
+  display: flex;
+  flex-direction: column;
+}
+
+.buypoints-section .panel-header {
+  flex-shrink: 0;
+}
+
+.buypoints-section .subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.buypoints-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.buypoint-card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+}
+
+.buypoint-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.buypoint-header .stock-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.buypoint-header .stock-code {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.change-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.change-badge.up {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--color-up);
+}
+
+.change-badge.down {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--color-down);
+}
+
+/* 波浪走势图 */
+.wave-chart {
+  position: relative;
+  height: 60px;
+  margin-bottom: 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.wave-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.price-labels {
+  position: absolute;
+  right: 8px;
+  top: 4px;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.price-labels .price-high,
+.price-labels .price-low {
+  background: rgba(10, 14, 26, 0.8);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* 买入记录区域 */
+.trade-history-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.trade-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.trade-history-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.trade-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.trade-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trade-tag {
+  background: var(--bg-hover);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.trade-tag .trade-num {
+  background: var(--color-buy);
+  color: white;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.trade-tag .trade-date {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* 删除交易记录按钮 */
+.btn-delete-trade {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 4px;
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+.btn-delete-trade:hover {
+  color: var(--color-clear);
+  transform: scale(1.2);
+}
+
+/* 智能分析板块 */
+.smart-analysis-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.smart-analysis-section .panel-header {
+  flex-shrink: 0;
+}
+
+.smart-analysis-section .loading-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.smart-analysis-section .refresh-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 8px;
+}
+
+.smart-analysis-section .btn-refresh {
+  background: var(--bg-hover);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.smart-analysis-section .btn-refresh:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.smart-analysis-section .btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.smart-analysis-list {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  align-content: start;
+}
+
+/* 股票走势图 */
+.stock-chart-container {
+  background: var(--bg-primary);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+
+.chart-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chart-type-switcher {
+  display: flex;
+  gap: 4px;
+}
+
+.chart-type-switcher button {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chart-type-switcher button:hover {
+  border-color: var(--accent);
+  color: var(--text-secondary);
+}
+
+.chart-type-switcher button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.chart-wrapper {
+  position: relative;
+  height: 120px;
+}
+
+.chart-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 14, 26, 0.8);
+  font-size: 12px;
+  color: var(--text-muted);
+  z-index: 10;
+}
+
+.chart-container {
+  width: 100%;
+  height: 100%;
+}
+
+.smart-analysis-card {
+  background: var(--bg-card);
+  border-radius: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.smart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.smart-stock-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.smart-stock-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.smart-stock-code {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.smart-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.score-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.score-value {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.score-value.high {
+  color: #48bb78;
+  background: rgba(72, 187, 120, 0.15);
+}
+
+.score-value.medium {
+  color: #ed8936;
+  background: rgba(237, 137, 54, 0.15);
+}
+
+.score-value.low {
+  color: #f56565;
+  background: rgba(245, 101, 101, 0.15);
+}
+
+.smart-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.signal-tag {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.signal-tag.bullish {
+  background: rgba(72, 187, 120, 0.2);
+  color: #48bb78;
+}
+
+.signal-tag.bearish {
+  background: rgba(245, 101, 101, 0.2);
+  color: #f56565;
+}
+
+.signal-tag.neutral {
+  background: rgba(160, 174, 192, 0.2);
+  color: var(--text-secondary);
+}
+
+.signal-tag.active {
+  background: rgba(102, 126, 234, 0.2);
+  color: var(--accent);
+}
+
+.signal-tag.profit {
+  background: rgba(72, 187, 120, 0.2);
+  color: #48bb78;
+}
+
+.signal-tag.loss {
+  background: rgba(245, 101, 101, 0.2);
+  color: #f56565;
+}
+
+.smart-insight {
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 4px;
+  margin-bottom: 4px;
+}
+
+.smart-insight p {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.smart-technical {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.tech-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+}
+
+.tech-label {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.tech-value {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.smart-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  padding: 2px 0;
+}
+
+.check-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.check-item.positive .check-dot {
+  background: #48bb78;
+}
+
+.check-item.negative .check-dot {
+  background: #f56565;
+}
+
+.check-item.neutral .check-dot {
+  background: var(--text-muted);
+}
+
+.check-label {
+  color: var(--text-secondary);
+  min-width: 50px;
+}
+
+.check-detail {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.smart-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  margin-top: auto;
+}
+
+.smart-suggestion .suggestion-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.smart-suggestion .suggestion-text {
+  font-weight: 500;
+}
+
+.smart-suggestion.HOLD {
+  background: rgba(66, 153, 225, 0.15);
+  color: #4299e1;
+}
+
+.smart-suggestion.SELL_PARTIAL {
+  background: rgba(237, 137, 54, 0.15);
+  color: #ed8936;
+}
+
+.smart-suggestion.STOP_LOSS {
+  background: rgba(229, 62, 62, 0.15);
+  color: #e53e3e;
+}
+
+.smart-suggestion.WAIT {
+  background: rgba(160, 174, 192, 0.15);
+  color: var(--text-secondary);
+}
+
+.smart-suggestion.WATCH {
+  background: rgba(102, 126, 234, 0.15);
+  color: var(--accent);
+}
+
+/* Responsive */
+@media (max-width: 1400px) {
+  .main-container {
+    grid-template-columns: 1fr 280px 260px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .smart-analysis-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .smart-analysis-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ========== 买卖点标记样式优化 ========== */
+.tradepoints-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.tradepoints-list {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tradepoint-card {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+}
+
+.tradepoint-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tradepoint-header .stock-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.tradepoint-header .stock-code {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.holding-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.holding-summary .summary-item {
+  text-align: center;
+}
+
+.holding-summary .summary-item label {
+  display: block;
+  font-size: 8px;
+  color: var(--text-muted);
+  margin-bottom: 1px;
+}
+
+.holding-summary .summary-item value {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trade-history-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.trade-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px 4px 0 0;
+}
+
+.trade-section-header.buy {
+  background: rgba(56, 161, 105, 0.15);
+  color: #48bb78;
+}
+
+.trade-section-header.sell {
+  background: rgba(229, 62, 62, 0.15);
+  color: #f56565;
+}
+
+.trade-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  margin-bottom: 3px;
+  background: var(--bg-card);
+  border-radius: 4px;
+  font-size: 9px;
+  border-left: 2px solid transparent;
+}
+
+.trade-tag.buy {
+  border-left-color: #48bb78;
+}
+
+.trade-tag.sell {
+  border-left-color: #f56565;
+}
+
+.trade-tag .trade-num {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+.trade-tag.buy .trade-num {
+  background: #48bb78;
+}
+
+.trade-tag.sell .trade-num {
+  background: #f56565;
+}
+
+/* ========== 交易操作标签页 ========== */
+.trade-type-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.trade-type-tabs button {
+  flex: 1;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.trade-type-tabs button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.trade-type-tabs button.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: transparent;
+  color: white;
+  font-weight: 600;
+}
+
+.trade-type-tabs button.active.sell {
+  background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+}
+
+/* 卖出按钮样式 */
+.btn-submit.sell {
+  background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+}
+
+.btn-submit.sell:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(237, 137, 54, 0.4);
+}
+
+/* 卖出表单样式 */
+.add-form select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.add-form select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.estimate-profit {
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.estimate-profit.up {
+  background: rgba(72, 187, 120, 0.15);
+  color: #48bb78;
+}
+
+.estimate-profit.down {
+  background: rgba(245, 101, 101, 0.15);
+  color: #f56565;
+}
+
+/* 持仓卡片中的卖出按钮 */
+.btn-sell {
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-sell:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+/* 响应式：小屏幕上交易规则恢复上下结构 */
+@media (max-width: 1200px) {
+  .rules-grid {
+    grid-template-columns: 1fr;
+  }
+}

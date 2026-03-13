@@ -1,0 +1,26 @@
+/* 爆款投资股票分析按钮样式 */
+.btn-hot-stock-analysis {
+  background: linear-gradient(135deg, #ff6b6b 0%, #f093fb 50%, #f5576c 100%);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.btn-hot-stock-analysis:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 87, 108, 0.5);
+}
+
+.btn-hot-stock-analysis:active {
+  transform: translateY(0);
+}
