@@ -93,6 +93,15 @@ class Database {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS watchlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   }
 
   // 添加或更新持仓

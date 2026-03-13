@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
 const StockAPI = require('./api/stock');
+const watchlistRoutes = require('./watchlist-routes');
 const KLineAPI = require('./api/kline');
 const TradingRules = require('./rules/trading');
 const AlertSystem = require('./alerts');
@@ -19,6 +20,9 @@ const db = new Database();
 
 app.use(cors());
 app.use(express.json());
+
+// 自选股 & A股筛选路由
+watchlistRoutes(app, db, stockAPI);
 
 /**
  * 计算持仓汇总信息

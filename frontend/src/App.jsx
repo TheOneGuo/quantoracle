@@ -8,6 +8,7 @@ import CloudMap from './components/CloudMap'
 import WorldMonitor from './components/WorldMonitor'
 import GlobalMarkets from './components/GlobalMarkets'
 import StrategyTemplates from './components/StrategyTemplates'
+import Watchlist from './components/Watchlist'
 import './App.css'
 
 const API_BASE = 'http://localhost:3001/api'
@@ -888,6 +889,9 @@ function App() {
             });
           }}
         />
+
+        {/* 自选股 */}
+        <Watchlist />
 
         {/* 交易规则 */}
         <div className="rules-panel">
