@@ -1,20 +1,43 @@
 """
-LLM 客户端，支持 Ollama 主力（qwen2.5:9b）和 OpenRouter 兜底
-配置从环境变量读取：
-- OLLAMA_BASE_URL: Ollama 地址（默认 http://localhost:11434）
-- OPENROUTER_API_KEY: 兜底模型 API Key
+LLM 客户端 - 基于 LiteLLM + 可配置网关架构
+
+设计原则：
+  所有模型调用通过统一网关层路由，网关 base_url 完全由环境变量控制。
+  当前默认：AIHubMix（https://aihubmix.com/v1）
+  将来：改 LLM_GATEWAY_URL 环境变量即可切换到自研中转站，业务代码零改动。
+
+核心组件：
+  1. llm_gateway.GatewayConfig：自动选择可用网关（自研中转站 > AIHubMix > OpenRouter > OpenAI直连）
+  2. 模型别名系统：free/standard/advanced/flagship → 实际模型ID，可通过 LLM_MODEL_ALIASES 环境变量覆盖
+  3. LiteLLM 统一调用层（可选依赖，未安装时降级为 requests 直接调用）
+
+环境变量优先级（高→低）：
+  - LLM_GATEWAY_URL + LLM_GATEWAY_KEY（自研中转站）
+  - AIHUBMIX_API_KEY（AIHubMix，当前默认）
+  - OPENAI_API_KEY（OpenAI直连）
+  - OPENROUTER_API_KEY（OpenRouter兜底）
 """
 
 import os
 import json
 import logging
 import time
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, List, Union
 
 import requests
 from requests.exceptions import RequestException, Timeout
 
+from .llm_gateway import get_gateway
+
 logger = logging.getLogger(__name__)
+
+# 尝试导入 LiteLLM（可选依赖）
+try:
+    import litellm
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    logger.warning("litellm 未安装，使用 requests 直接调用。建议: pip install litellm>=1.40.0")
 
 
 class LLMClient:
