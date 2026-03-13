@@ -9,6 +9,7 @@ import WorldMonitor from './components/WorldMonitor'
 import GlobalMarkets from './components/GlobalMarkets'
 import StrategyTemplates from './components/StrategyTemplates'
 import Watchlist from './components/Watchlist'
+import ParadigmEditor from './components/ParadigmEditor'
 import './App.css'
 
 const API_BASE = 'http://localhost:3001/api'
@@ -1128,6 +1129,10 @@ function App() {
   const goToStrategyTemplates = () => {
     navigate('/strategy')
   }
+
+  const goToParadigms = () => {
+    navigate('/paradigms')
+  }
   
   const goToHome = () => {
     navigate('/')
@@ -1181,6 +1186,13 @@ function App() {
           >
             📋 策略模板
           </button>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={goToParadigms}
+            style={{ background: '#1a4d8a' }}
+          >
+            📚 知识库
+          </button>
           {location.pathname === '/' ? (
             <button
               className="btn-hot-stock-analysis"
@@ -1219,6 +1231,7 @@ function App() {
         <Route path="/worldmonitor" element={<WorldMonitor />} />
         <Route path="/globalmarkets" element={<GlobalMarkets />} />
         <Route path="/strategy" element={<StrategyTemplates />} />
+        <Route path="/paradigms" element={<ParadigmEditor />} />
       </Routes>
     </div>
   )
