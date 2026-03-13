@@ -6,6 +6,8 @@ import HotStockAnalysis from './components/HotStockAnalysis'
 import TradeRuleMonitor from './components/TradeRuleMonitor'
 import CloudMap from './components/CloudMap'
 import WorldMonitor from './components/WorldMonitor'
+import GlobalMarkets from './components/GlobalMarkets'
+import StrategyTemplates from './components/StrategyTemplates'
 import './App.css'
 
 const API_BASE = 'http://localhost:3001/api'
@@ -1110,6 +1112,18 @@ function App() {
   const goToCloudMap = () => {
     navigate('/cloudmap')
   }
+
+  const goToWorldMonitor = () => {
+    navigate('/worldmonitor')
+  }
+
+  const goToGlobalMarkets = () => {
+    navigate('/globalmarkets')
+  }
+
+  const goToStrategyTemplates = () => {
+    navigate('/strategy')
+  }
   
   const goToHome = () => {
     navigate('/')
@@ -1142,19 +1156,33 @@ function App() {
           >
             📊 大盘云图
           </button>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={goToWorldMonitor}
+            style={{ background: '#6b46c1' }}
+          >
+            🌍 全球局势
+          </button>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={goToGlobalMarkets}
+            style={{ background: '#2b6cb0' }}
+          >
+            📈 全球市场
+          </button>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={goToStrategyTemplates}
+            style={{ background: '#276749' }}
+          >
+            📋 策略模板
+          </button>
           {location.pathname === '/' ? (
             <button
               className="btn-hot-stock-analysis"
               onClick={goToAnalysis}
             >
               🔥 爆款投资股票分析
-            </button>
-          ) : location.pathname === '/cloudmap' ? (
-            <button
-              className="btn-hot-stock-analysis"
-              onClick={goToHome}
-            >
-              ← 返回首页
             </button>
           ) : (
             <button
@@ -1184,6 +1212,9 @@ function App() {
           />
         } />
         <Route path="/cloudmap" element={<CloudMap />} />
+        <Route path="/worldmonitor" element={<WorldMonitor />} />
+        <Route path="/globalmarkets" element={<GlobalMarkets />} />
+        <Route path="/strategy" element={<StrategyTemplates />} />
       </Routes>
     </div>
   )
