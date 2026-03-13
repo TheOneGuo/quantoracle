@@ -134,6 +134,85 @@ class Database {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // =====================
+    // 策略广场核心表
+    // =====================
+
+    // 策略表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategies (
+        id TEXT PRIMARY KEY,              -- UUID
+        creator_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        strategy_code TEXT,               -- Lean策略代码（加密可选）
+        market TEXT NOT NULL,             -- A股/美股/港股
+        style TEXT NOT NULL,              -- conservative/neutral/aggressive
+        tags TEXT,                        -- JSON数组，如 ["动量","成长"]
+        backtest_metrics TEXT,            -- JSON，回测指标
+        live_metrics TEXT,                -- JSON，实盘指标（定期更新）
+        grade TEXT DEFAULT 'C',           -- S/A/B/C/D
+        price_monthly REAL DEFAULT 0,     -- 月度订阅价（0=免费）
+        price_yearly REAL DEFAULT 0,
+        commission_rate REAL DEFAULT 0.20,-- 平台抽佣率（默认20%）
+        status TEXT DEFAULT 'pending',    -- pending/active/warning/delisted
+        subscribers INTEGER DEFAULT 0,   -- 订阅人数缓存
+        total_revenue REAL DEFAULT 0,    -- 总收入缓存
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 订阅表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        strategy_id TEXT NOT NULL,
+        plan TEXT NOT NULL,               -- monthly/yearly/per_signal/buyout
+        start_date TEXT NOT NULL,
+        end_date TEXT,
+        amount_paid REAL NOT NULL,
+        platform_fee REAL NOT NULL,
+        creator_revenue REAL NOT NULL,
+        status TEXT DEFAULT 'active',     -- active/expired/cancelled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+      )
+    `);
+
+    // 实盘跟踪表（记录购买用户的实际盈亏）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS live_tracking (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subscription_id TEXT NOT NULL,
+        strategy_id TEXT NOT NULL,
+        signal_id TEXT,
+        action TEXT NOT NULL,             -- buy/sell
+        code TEXT NOT NULL,
+        code_name TEXT,
+        price REAL,
+        quantity INTEGER,
+        pnl REAL,
+        pnl_percent REAL,
+        executed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+      )
+    `);
+
+    // 策略评价表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        rating INTEGER NOT NULL,          -- 1-5
+        comment TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+      )
+    `);
   }
 
   // 添加或更新持仓

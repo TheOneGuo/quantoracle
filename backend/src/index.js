@@ -1249,6 +1249,123 @@ app.get('/api/cloudmap-proxy', async (req, res) => {
   }
 });
 
+// =============================================
+// 策略广场 API（M3）
+// =============================================
+const { MOCK_STRATEGIES } = require('./mock/marketplace-mock');
+const { calculateGrade } = require('./services/gradeCalculator');
+// 用 crypto 生成 UUID，避免额外依赖
+const { randomUUID } = require('crypto');
+
+/**
+ * 获取策略列表（公开浏览）
+ * 支持市场/等级/风格/排序筛选
+ */
+app.get('/api/marketplace/strategies', (req, res) => {
+  const { market, grade, style, sort = 'subscribers', page = 1, limit = 20, free_only } = req.query;
+  try {
+    let strategies = db.db ? (() => {
+      let sql = 'SELECT * FROM strategies WHERE status = "active"';
+      const params = [];
+      if (market && market !== '全部') { sql += ' AND market = ?'; params.push(market); }
+      if (grade) { sql += ' AND grade = ?'; params.push(grade); }
+      if (style) { sql += ' AND style = ?'; params.push(style); }
+      if (free_only === 'true') { sql += ' AND price_monthly = 0'; }
+      const sortMap = { subscribers: 'subscribers DESC', annual_return: 'json_extract(backtest_metrics,"$.annual_return") DESC', sharpe: 'json_extract(backtest_metrics,"$.sharpe") DESC', created_at: 'created_at DESC' };
+      sql += ` ORDER BY ${sortMap[sort] || 'subscribers DESC'} LIMIT ? OFFSET ?`;
+      params.push(Number(limit), (Number(page) - 1) * Number(limit));
+      return db.db.prepare(sql).all(...params);
+    })() : [];
+
+    // 数据库为空时用 mock 数据
+    if (!strategies.length) strategies = MOCK_STRATEGIES;
+
+    // 解析 JSON 字段
+    strategies = strategies.map(s => ({
+      ...s,
+      backtest_metrics: typeof s.backtest_metrics === 'string' ? JSON.parse(s.backtest_metrics || '{}') : s.backtest_metrics,
+      live_metrics: typeof s.live_metrics === 'string' ? JSON.parse(s.live_metrics || '{}') : s.live_metrics,
+      tags: typeof s.tags === 'string' ? JSON.parse(s.tags || '[]') : s.tags,
+    }));
+
+    res.json({ success: true, total: strategies.length, page: Number(page), strategies, is_mock: !db.db });
+  } catch (e) {
+    res.json({ success: true, total: MOCK_STRATEGIES.length, page: 1, strategies: MOCK_STRATEGIES, is_mock: true });
+  }
+});
+
+/**
+ * 获取策略详情
+ */
+app.get('/api/marketplace/strategies/:id', (req, res) => {
+  const mock = MOCK_STRATEGIES.find(s => s.id === req.params.id);
+  res.json({ success: true, strategy: mock || null, is_mock: true });
+});
+
+/**
+ * 发布策略（创作者）
+ */
+app.post('/api/marketplace/strategies', (req, res) => {
+  const { name, description, market, style, tags, backtest_metrics, price_monthly = 0, price_yearly = 0, creator_id = 'anonymous' } = req.body;
+  if (!name || !market || !style) return res.status(400).json({ success: false, error: '缺少必填字段: name/market/style' });
+
+  const id = randomUUID();
+  const grade = calculateGrade({ backtest_metrics });
+
+  try {
+    db.db.prepare(`INSERT INTO strategies (id,creator_id,name,description,market,style,tags,backtest_metrics,price_monthly,price_yearly,grade,status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`).run(
+      id, creator_id, name, description, market, style,
+      JSON.stringify(tags || []), JSON.stringify(backtest_metrics || {}),
+      price_monthly, price_yearly, grade
+    );
+    res.json({ success: true, id, grade, message: '策略已提交，审核后发布到广场' });
+  } catch (e) {
+    res.json({ success: true, id, grade, message: '（Mock模式）策略已记录', is_mock: true });
+  }
+});
+
+/**
+ * 订阅策略
+ */
+app.post('/api/marketplace/subscribe', (req, res) => {
+  const { strategy_id, plan = 'monthly', user_id = 'anonymous' } = req.body;
+  const strategy = MOCK_STRATEGIES.find(s => s.id === strategy_id) || {};
+  const amount = plan === 'yearly' ? (strategy.price_yearly || 0) : (strategy.price_monthly || 0);
+  const commission_rate = strategy.commission_rate || 0.20;
+  const platform_fee = amount * commission_rate;
+  const creator_revenue = amount - platform_fee;
+
+  const subscription_id = randomUUID();
+  res.json({ success: true, subscription_id, amount, platform_fee, creator_revenue, message: amount === 0 ? '免费策略，已订阅' : `订阅成功，已扣除 ¥${amount}` });
+});
+
+/**
+ * 排行榜（按年化收益/夏普/实盘盈利率）
+ */
+app.get('/api/marketplace/leaderboard', (req, res) => {
+  const { type = 'annual_return', limit: top = 10 } = req.query;
+  const sorted = [...MOCK_STRATEGIES].sort((a, b) => {
+    const getVal = (s) => {
+      if (type === 'sharpe') return s.backtest_metrics?.sharpe || 0;
+      if (type === 'live_profit_rate') return s.live_metrics?.profit_user_rate || 0;
+      return s.backtest_metrics?.annual_return || 0;
+    };
+    return getVal(b) - getVal(a);
+  }).slice(0, Number(top));
+  res.json({ success: true, type, leaderboard: sorted });
+});
+
+/**
+ * 重新计算策略等级（内部接口）
+ */
+app.post('/api/marketplace/strategies/:id/recalculate-grade', (req, res) => {
+  const strategy = MOCK_STRATEGIES.find(s => s.id === req.params.id);
+  if (!strategy) return res.status(404).json({ success: false, error: '策略不存在' });
+  const grade = calculateGrade(strategy, strategy.live_metrics);
+  res.json({ success: true, id: req.params.id, old_grade: strategy.grade, new_grade: grade });
+});
+
 // 优雅关闭
 process.on('SIGINT', () => {
   console.log('\nClosing database connection...');
