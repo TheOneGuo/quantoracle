@@ -1,0 +1,25 @@
+# Kronos核心依赖
+numpy>=1.24.0
+pandas>=2.0.0
+torch>=2.0.0
+einops==0.8.1
+huggingface_hub>=0.20.0
+matplotlib>=3.7.0
+tqdm>=4.65.0
+safetensors>=0.4.0
+
+# Web框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.4.0
+
+# 可选：Apple Silicon支持
+# 安装PyTorch with MPS支持:
+# pip install torch torchvision torchaudio
+
+# 开发工具
+python-dotenv>=1.0.0
+
+# 注意：实际运行Kronos需要从GitHub克隆模型代码
+# git clone https://github.com/shiyu-coder/Kronos.git
+# 或直接导入：from model.kronos import Kronos, KronosTokenizer, KronosPredictor

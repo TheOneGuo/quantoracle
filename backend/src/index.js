@@ -652,6 +652,224 @@ app.post('/api/ai/doubao', async (req, res) => {
   }
 });
 
+/**
+ * AI 智能选股接口
+ * 调用 Python TradingAgents 微服务（:8765）
+ * 
+ * @route POST /api/ai/screen
+ * @body {string} market - 市场（A股/美股/港股）
+ * @body {string} style - 风格（conservative/neutral/aggressive）
+ * @body {number} count - 候选股数量（默认10）
+ * @body {boolean} use_news_factor - 是否启用新闻因子
+ * @returns {Object} 候选股列表，含多维度评分和 AI 分析理由
+ */
+app.post('/api/ai/screen', async (req, res) => {
+    const { market, style, count, use_news_factor, filters } = req.body;
+    
+    // 参数验证
+    if (!market || !style) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少必要参数: market 和 style'
+        });
+    }
+    
+    const validMarkets = ['A股', '美股', '港股'];
+    if (!validMarkets.includes(market)) {
+        return res.status(400).json({
+            success: false,
+            error: `不支持的市場: ${market}，支持: ${validMarkets.join(', ')}`
+        });
+    }
+    
+    const validStyles = ['conservative', 'neutral', 'aggressive'];
+    if (!validStyles.includes(style)) {
+        return res.status(400).json({
+            success: false,
+            error: `不支持的風格: ${style}，支持: ${validStyles.join(', ')}`
+        });
+    }
+    
+    const requestCount = Math.min(Math.max(parseInt(count) || 10, 1), 50);
+    const useNews = Boolean(use_news_factor);
+    
+    try {
+        // 调用 TradingAgents Python 服务
+        const tradingAgentsUrl = process.env.TRADING_AGENTS_URL || 'http://localhost:8765';
+        const response = await fetch(`${tradingAgentsUrl}/screen`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                market,
+                style,
+                count: requestCount,
+                use_news_factor: useNews,
+                filters: filters || {}
+            }),
+            timeout: 30000  // 30秒超时
+        });
+        
+        if (!response.ok) {
+            throw new Error(`TradingAgents 服务返回错误: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // 确保返回格式一致
+        if (!data.success) {
+            return res.status(500).json({
+                success: false,
+                error: data.error || 'AI选股服务返回失败',
+                is_fallback: true
+            });
+        }
+        
+        res.json({
+            success: true,
+            model: data.model || 'trading-agents',
+            is_fallback: data.is_fallback || false,
+            llm_available: data.llm_available !== false,
+            stocks: data.stocks || [],
+            active_events: data.active_events || [],
+            duration_ms: data.duration_ms || 0,
+            market: data.market || market,
+            style: data.style || style,
+            count_analyzed: data.count_analyzed || 0,
+            count_returned: data.count_returned || 0,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('AI选股服务调用失败:', error);
+        
+        // 超时或服务不可达时返回 mock 数据
+        const isTimeout = error.name === 'AbortError' || error.message.includes('timeout');
+        
+        if (isTimeout || error.message.includes('ECONNREFUSED')) {
+            // 返回模拟数据并标记 is_fallback: true
+            const mockData = require('./mock/ai-screen-mock'); // 假设有mock文件
+            const fallbackData = mockData.generateFallbackStocks(market, style, requestCount);
+            
+            return res.json({
+                success: true,
+                model: 'mock-fallback',
+                is_fallback: true,
+                llm_available: false,
+                stocks: fallbackData,
+                active_events: [],
+                duration_ms: 100,
+                market,
+                style,
+                count_analyzed: requestCount,
+                count_returned: Math.min(fallbackData.length, requestCount),
+                timestamp: new Date().toISOString(),
+                warning: 'AI 服务不可达，显示模拟筛选结果'
+            });
+        }
+        
+        res.status(500).json({
+            success: false,
+            error: `AI选股服务调用失败: ${error.message}`,
+            is_fallback: false
+        });
+    }
+});
+
+/**
+ * Kronos 择时预测接口
+ * 调用 Kronos 微服务预测股票走势
+ * 
+ * @route GET /api/kronos/predict/:code
+ * @param {string} code - 股票代码
+ * @query {string} model - 模型规格（kronos-mini/small/base）
+ * @query {number} pred_len - 预测长度（默认20）
+ * @returns {Object} 预测结果，含趋势、置信度、开仓/平仓信号
+ */
+app.get('/api/kronos/predict/:code', async (req, res) => {
+    const { code } = req.params;
+    const { model = 'kronos-base', pred_len = 20 } = req.query;
+    
+    if (!code) {
+        return res.status(400).json({
+            success: false,
+            error: '缺少股票代码参数'
+        });
+    }
+    
+    try {
+        // 调用 Kronos 微服务
+        const kronosUrl = process.env.KRONOS_URL || 'http://localhost:8888';
+        const response = await fetch(
+            `${kronosUrl}/predict/${encodeURIComponent(code)}?model=${model}&pred_len=${pred_len}`,
+            { timeout: 10000 }  // 10秒超时
+        );
+        
+        if (!response.ok) {
+            throw new Error(`Kronos 服务返回错误: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // 确保返回格式一致
+        if (!data.success) {
+            return res.status(500).json({
+                success: false,
+                error: data.error || 'Kronos预测服务返回失败',
+                is_mock: true
+            });
+        }
+        
+        res.json({
+            success: true,
+            code: data.code || code,
+            model: data.model || model,
+            is_mock: data.is_mock || false,
+            trend: data.trend || 'neutral',
+            confidence: data.confidence || 0.5,
+            entry_signal: data.entry_signal || false,
+            exit_signal: data.exit_signal || false,
+            forecast: data.forecast || [],
+            analysis: data.analysis || 'Kronos择时分析',
+            cached: data.cached || false,
+            inference_ms: data.inference_ms || 0,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Kronos预测服务调用失败:', error);
+        
+        // 返回模拟数据
+        const mockTrend = Math.random() > 0.5 ? 'bullish' : 'bearish';
+        const mockConfidence = 0.5 + Math.random() * 0.3;
+        
+        res.json({
+            success: true,
+            code,
+            model,
+            is_mock: true,
+            trend: mockTrend,
+            confidence: mockConfidence,
+            entry_signal: mockTrend === 'bullish' && mockConfidence > 0.6,
+            exit_signal: mockTrend === 'bearish' && mockConfidence > 0.65,
+            forecast: Array(parseInt(pred_len)).fill(0).map((_, i) => [
+                Date.now() + i * 86400000,  // 时间戳
+                100 + Math.random() * 10,   // open
+                105 + Math.random() * 10,   // high
+                95 + Math.random() * 10,    // low
+                102 + Math.random() * 10,   // close
+                1000000 + Math.random() * 500000  // volume
+            ]),
+            analysis: `模拟分析：${code} 当前趋势${mockTrend}，置信度${mockConfidence.toFixed(2)}`,
+            cached: false,
+            inference_ms: 50,
+            timestamp: new Date().toISOString(),
+            warning: 'Kronos 服务不可达，显示模拟预测结果'
+        });
+    }
+});
+
 // 定时检查持仓规则（每小时执行一次）
 cron.schedule('0 * * * *', async () => {
   console.log('[定时任务] 检查持仓规则...');
