@@ -55,7 +55,8 @@ class TradingAgentsOrchestrator:
         }
     
     async def analyze_stock_async(self, code: str, name: str = None, 
-                                 industry: str = None, use_news_factor: bool = True) -> Dict[str, Any]:
+                                 industry: str = None, use_news_factor: bool = True,
+                                 model_id: Optional[str] = None) -> Dict[str, Any]:
         """
         异步分析单只股票
         
@@ -104,7 +105,7 @@ class TradingAgentsOrchestrator:
                 agent_results[agent_name] = result
         
         # 组织Bull vs Bear辩论
-        debate_result = await self._conduct_debate(code, name, agent_results)
+        debate_result = await self._conduct_debate(code, name, agent_results, model_id)
         
         # 生成最终评分
         final_result = self._generate_final_score(code, name, agent_results, debate_result)
@@ -118,7 +119,8 @@ class TradingAgentsOrchestrator:
         return final_result
     
     def analyze_stock(self, code: str, name: str = None, 
-                     industry: str = None, use_news_factor: bool = True) -> Dict[str, Any]:
+                     industry: str = None, use_news_factor: bool = True,
+                     model_id: Optional[str] = None) -> Dict[str, Any]:
         """
         同步分析单只股票（包装异步方法）
         
@@ -127,6 +129,7 @@ class TradingAgentsOrchestrator:
             name: 股票名称
             industry: 所属行业
             use_news_factor: 是否启用新闻因子分析
+            model_id: 指定的模型ID，传递给LLM调用
             
         Returns:
             完整的分析结果
@@ -139,7 +142,7 @@ class TradingAgentsOrchestrator:
             asyncio.set_event_loop(loop)
         
         return loop.run_until_complete(
-            self.analyze_stock_async(code, name, industry, use_news_factor)
+            self.analyze_stock_async(code, name, industry, use_news_factor, model_id)
         )
     
     async def _run_agent_async(self, agent_name: str, code: str, 
@@ -244,7 +247,8 @@ class TradingAgentsOrchestrator:
         return result
     
     async def _conduct_debate(self, code: str, name: str, 
-                             agent_results: Dict[str, Dict]) -> Dict[str, Any]:
+                             agent_results: Dict[str, Dict],
+                             model_id: Optional[str] = None) -> Dict[str, Any]:
         """
         组织Bull vs Bear辩论
         
@@ -252,6 +256,7 @@ class TradingAgentsOrchestrator:
             code: 股票代码
             name: 股票名称
             agent_results: 各Agent分析结果
+            model_id: 指定的模型ID，传递给LLM调用
             
         Returns:
             辩论结果
@@ -314,14 +319,18 @@ class TradingAgentsOrchestrator:
 
 保持专业、客观、平衡，避免极端观点。"""
         
-        result = self.llm_client.generate_json(prompt, system_prompt)
+        llm_response = self.llm_client.generate_json(prompt, system_prompt, model_id)
         
-        if result:
+        if llm_response:
+            # 获取token消耗信息
+            estimated_tokens = self.llm_client.model_cost_map.get(model_id, 0) if model_id else 0
             return {
-                "debate_result": result,
+                "debate_result": llm_response,
                 "llm_used": True,
                 "bull_points_count": len(bull_points),
-                "bear_points_count": len(bear_points)
+                "bear_points_count": len(bear_points),
+                "estimated_tokens": estimated_tokens,
+                "model_id": model_id
             }
         else:
             # LLM生成失败，使用简单规则
@@ -382,7 +391,9 @@ class TradingAgentsOrchestrator:
             },
             "llm_used": False,
             "bull_points_count": bull_count,
-            "bear_points_count": bear_count
+            "bear_points_count": bear_count,
+            "estimated_tokens": 0,  # 简单规则不消耗token
+            "model_id": None
         }
     
     def _generate_final_score(self, code: str, name: str, 
@@ -430,6 +441,10 @@ class TradingAgentsOrchestrator:
         # 限制在0-1之间
         final_score = max(0.0, min(1.0, final_score))
         
+        # 获取token消耗信息（从debate_result）
+        estimated_tokens = debate_result.get("estimated_tokens", 0)
+        model_id = debate_result.get("model_id")
+        
         # 生成最终结果
         return {
             "code": code,
@@ -443,7 +458,9 @@ class TradingAgentsOrchestrator:
             "key_risks": debate_result["debate_result"].get("key_risks", []),
             "key_opportunities": debate_result["debate_result"].get("key_opportunities", []),
             "llm_available": self.llm_client.is_available(),
-            "orchestrator": self.name
+            "orchestrator": self.name,
+            "estimated_tokens": estimated_tokens,
+            "model_id": model_id
         }
 
 

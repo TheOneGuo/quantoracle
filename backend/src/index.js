@@ -778,6 +778,298 @@ app.post('/api/ai/screen', async (req, res) => {
 });
 
 /**
+ * Token 计量系统路由
+ * 管理用户 token 余额和使用记录
+ */
+
+/**
+ * 查询用户 token 余额
+ * @route GET /api/usage/balance
+ * @returns {Object} 用户 token 余额信息
+ */
+app.get('/api/usage/balance', async (req, res) => {
+    try {
+        const userId = req.query.user_id || 'default';
+        const balanceInfo = await db.getUserTokenBalance(userId);
+        
+        res.json({
+            success: true,
+            user_id: userId,
+            remaining: balanceInfo.balance,
+            purchased_total: balanceInfo.purchased_total,
+            consumed_total: balanceInfo.consumed_total,
+            last_purchase: balanceInfo.last_purchase_date,
+            last_consumption: balanceInfo.last_consumption_date
+        });
+    } catch (error) {
+        console.error('查询 token 余额失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `查询 token 余额失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 获取 token 使用历史记录
+ * @route GET /api/usage/history
+ * @query {number} limit - 返回记录数（默认50）
+ * @query {number} offset - 偏移量（默认0）
+ * @returns {Object} token 使用历史记录
+ */
+app.get('/api/usage/history', async (req, res) => {
+    try {
+        const userId = req.query.user_id || 'default';
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = parseInt(req.query.offset) || 0;
+        
+        const history = await db.getTokenUsageHistory(userId, limit, offset);
+        
+        res.json({
+            success: true,
+            user_id: userId,
+            history: history,
+            pagination: {
+                limit,
+                offset,
+                total: history.length
+            }
+        });
+    } catch (error) {
+        console.error('获取 token 使用历史失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `获取 token 使用历史失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 内部扣减 token（AI调用时调用）
+ * @route POST /api/usage/deduct
+ * @body {Object} usageData - 使用数据
+ * @returns {Object} 扣减结果
+ */
+app.post('/api/usage/deduct', async (req, res) => {
+    try {
+        const { user_id = 'default', usage_data } = req.body;
+        
+        if (!usage_data) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少 usage_data 参数'
+            });
+        }
+        
+        // 验证必填字段
+        const requiredFields = ['function_name', 'model_id'];
+        for (const field of requiredFields) {
+            if (!usage_data[field]) {
+                return res.status(400).json({
+                    success: false,
+                    error: `缺少必填字段: ${field}`
+                });
+            }
+        }
+        
+        // 计算总token数（如果没有提供tokens_total）
+        if (!usage_data.tokens_total && !usage_data.tokens_input && !usage_data.tokens_output) {
+            return res.status(400).json({
+                success: false,
+                error: '必须提供 tokens_total、tokens_input 或 tokens_output'
+            });
+        }
+        
+        // 执行扣减
+        const result = await db.deductTokens(user_id, usage_data);
+        
+        res.json({
+            success: true,
+            user_id,
+            usage_id: result.usage_id,
+            new_balance: result.new_balance,
+            tokens_deducted: result.tokens_deducted,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('扣减 token 失败:', error);
+        
+        if (error.message === 'Insufficient token balance') {
+            return res.status(402).json({
+                success: false,
+                error: 'Token 余额不足',
+                code: 'INSUFFICIENT_BALANCE'
+            });
+        }
+        
+        res.status(500).json({
+            success: false,
+            error: `扣减 token 失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 获取 token 使用统计
+ * @route GET /api/usage/stats
+ * @query {number} days - 统计天数（默认30）
+ * @returns {Object} token 使用统计数据
+ */
+app.get('/api/usage/stats', async (req, res) => {
+    try {
+        const userId = req.query.user_id || 'default';
+        const days = parseInt(req.query.days) || 30;
+        
+        const stats = await db.getTokenUsageStats(userId, days);
+        
+        // 按日期分组，便于前端展示
+        const groupedByDate = {};
+        stats.forEach(stat => {
+            if (!groupedByDate[stat.date]) {
+                groupedByDate[stat.date] = [];
+            }
+            groupedByDate[stat.date].push({
+                model_id: stat.model_id,
+                function_name: stat.function_name,
+                total_tokens: stat.total_tokens,
+                request_count: stat.request_count
+            });
+        });
+        
+        // 计算汇总统计
+        const summary = {
+            total_tokens: stats.reduce((sum, stat) => sum + (stat.total_tokens || 0), 0),
+            total_requests: stats.reduce((sum, stat) => sum + (stat.request_count || 0), 0),
+            unique_models: [...new Set(stats.map(stat => stat.model_id))].length,
+            unique_functions: [...new Set(stats.map(stat => stat.function_name))].length
+        };
+        
+        res.json({
+            success: true,
+            user_id: userId,
+            period_days: days,
+            summary: summary,
+            daily_stats: groupedByDate,
+            raw_stats: stats
+        });
+    } catch (error) {
+        console.error('获取 token 统计失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `获取 token 统计失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 充值 token（测试/管理用）
+ * @route POST /api/usage/add
+ * @body {number} tokens - 增加的 token 数量
+ * @body {string} purchase_method - 购买方式（system/test/user）
+ * @returns {Object} 充值结果
+ */
+app.post('/api/usage/add', async (req, res) => {
+    try {
+        const { user_id = 'default', tokens, purchase_method = 'system' } = req.body;
+        
+        if (!tokens || tokens <= 0) {
+            return res.status(400).json({
+                success: false,
+                error: '必须提供有效的 tokens 数量'
+            });
+        }
+        
+        const result = await db.addTokens(user_id, tokens, purchase_method);
+        
+        res.json({
+            success: true,
+            user_id,
+            new_balance: result.new_balance,
+            tokens_added: result.tokens_added,
+            purchase_method: result.purchase_method,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('充值 token 失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `充值 token 失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 获取可用模型目录
+ * @route GET /api/models/catalog
+ * @returns {Object} 可用模型列表
+ */
+app.get('/api/models/catalog', async (req, res) => {
+    try {
+        // 从配置文件或数据库获取模型目录
+        // 这里返回硬编码的模型列表，后续可从数据库读取
+        const modelCatalog = [
+            { 
+                id: "stepfun/step-3.5-flash:free", 
+                name: "StepFun Flash", 
+                badge: "免费", 
+                tokenCost: 0, 
+                quality: 3,
+                description: "快速响应，适合日常分析",
+                maxTokens: 2048,
+                latency: "fast",
+                available: true
+            },
+            { 
+                id: "deepseek/deepseek-v3.2", 
+                name: "DeepSeek V3", 
+                badge: "标准", 
+                tokenCost: 15000, 
+                quality: 4,
+                description: "平衡性能与成本，推荐使用",
+                maxTokens: 8192,
+                latency: "medium",
+                available: true
+            },
+            { 
+                id: "anthropic/claude-sonnet-4-5", 
+                name: "Claude Sonnet", 
+                badge: "高级", 
+                tokenCost: 60000, 
+                quality: 5,
+                description: "高质量分析，适合复杂推理",
+                maxTokens: 16384,
+                latency: "slow",
+                available: true
+            },
+            { 
+                id: "openai/gpt-4.5", 
+                name: "GPT-4.5", 
+                badge: "旗舰", 
+                tokenCost: 120000, 
+                quality: 5,
+                description: "顶尖性能，处理复杂任务",
+                maxTokens: 32768,
+                latency: "medium",
+                available: false,
+                reason: "暂未开放"
+            }
+        ];
+        
+        res.json({
+            success: true,
+            models: modelCatalog,
+            last_updated: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('获取模型目录失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `获取模型目录失败: ${error.message}`
+        });
+    }
+});
+
+/**
  * Kronos 择时预测接口
  * 调用 Kronos 微服务预测股票走势
  * 

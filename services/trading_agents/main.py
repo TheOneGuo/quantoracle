@@ -51,6 +51,7 @@ class ScreeningRequest(BaseModel):
     style: str = Field(default="neutral", description="投资风格（conservative/neutral/aggressive）")
     count: int = Field(default=10, ge=1, le=50, description="候选股数量")
     use_news_factor: bool = Field(default=False, description="是否启用新闻因子")
+    model: str = Field(default="stepfun/step-3.5-flash:free", description="AI模型ID（从模型选择器获取）")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="额外过滤条件")
     
     class Config:
@@ -60,6 +61,7 @@ class ScreeningRequest(BaseModel):
                 "style": "neutral",
                 "count": 10,
                 "use_news_factor": True,
+                "model": "stepfun/step-3.5-flash:free",
                 "filters": {
                     "pe_max": 30,
                     "market_cap_min": 50,
@@ -235,7 +237,8 @@ async def screen_stocks(request: ScreeningRequest, background_tasks: BackgroundT
                 code=stock["code"],
                 name=stock["name"],
                 industry=stock.get("industry"),
-                use_news_factor=request.use_news_factor
+                use_news_factor=request.use_news_factor,
+                model_id=request.model
             )
             
             # 检查是否使用了fallback
@@ -258,7 +261,10 @@ async def screen_stocks(request: ScreeningRequest, background_tasks: BackgroundT
                     "investment_advice": result.get("investment_advice"),
                     "key_risks": result.get("key_risks", []),
                     "key_opportunities": result.get("key_opportunities", [])
-                }
+                },
+                # Token消耗信息
+                "estimated_tokens": result.get("estimated_tokens", 0),
+                "model_id": result.get("model_id")
             })
             
         except Exception as e:
@@ -276,11 +282,13 @@ async def screen_stocks(request: ScreeningRequest, background_tasks: BackgroundT
     duration_ms = int((time.time() - start_time) * 1000)
     
     # 确定使用的模型
-    model_used = "qwen2.5:9b" if llm_client.is_available() else "rule-based"
+    # 如果用户指定了模型，使用指定模型；否则使用默认逻辑
+    model_used = request.model if request.model else "qwen2.5:9b" if llm_client.is_available() else "rule-based"
     
     response = {
         "success": True,
         "model": model_used,
+        "requested_model": request.model,
         "is_fallback": fallback_used,
         "llm_available": llm_client.is_available(),
         "stocks": final_results,

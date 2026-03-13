@@ -19,12 +19,13 @@ logger = logging.getLogger(__name__)
 
 class LLMClient:
     """
-    统一 LLM 调用客户端，支持多路降级策略。
+    统一 LLM 调用客户端，支持多路降级策略和动态模型选择。
     
     调用顺序：
-    1. 尝试 Ollama（qwen2.5:9b）
-    2. 若失败，尝试 OpenRouter DeepSeek 兜底
-    3. 若兜底也失败，返回模拟数据并标记 llm_available=False
+    1. 如果指定了模型ID且是OpenRouter模型，直接调用OpenRouter
+    2. 否则尝试 Ollama（qwen2.5:9b）
+    3. 若失败，尝试 OpenRouter 默认兜底模型
+    4. 若兜底也失败，返回模拟数据并标记 llm_available=False
     """
     
     def __init__(self):
@@ -38,7 +39,7 @@ class LLMClient:
         self.ollama_model = "qwen2.5:9b"
         # 当前兜底：StepFun step-3.5-flash（免费，OpenRouter）
         # 待 Mac Mini 上线后可切回 deepseek/deepseek-v3.2
-        self.openrouter_model = os.getenv(
+        self.default_openrouter_model = os.getenv(
             "OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"
         )
         
@@ -50,6 +51,14 @@ class LLMClient:
         # 状态标记
         self.llm_available = True
         self.last_error = None
+        
+        # 模型成本映射（token/次，简化估算）
+        self.model_cost_map = {
+            "stepfun/step-3.5-flash:free": 0,
+            "deepseek/deepseek-v3.2": 15000,
+            "anthropic/claude-sonnet-4-5": 60000,
+            "openai/gpt-4.5": 120000
+        }
     
     def _call_ollama(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
         """
@@ -104,12 +113,13 @@ class LLMClient:
         
         return None
     
-    def _call_openrouter(self, messages: list) -> Optional[str]:
+    def _call_openrouter(self, messages: list, model_id: Optional[str] = None) -> Optional[str]:
         """
-        调用 OpenRouter API 兜底
+        调用 OpenRouter API
         
         Args:
             messages: OpenAI 格式的消息列表
+            model_id: 指定的模型ID，如果为None则使用默认兜底模型
             
         Returns:
             模型回复文本，失败返回 None
@@ -123,15 +133,18 @@ class LLMClient:
             "Content-Type": "application/json"
         }
         
+        # 使用指定的模型或默认兜底模型
+        model_to_use = model_id or self.default_openrouter_model
+        
         payload = {
-            "model": self.openrouter_model,
+            "model": model_to_use,
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": 2048
         }
         
         try:
-            logger.debug("Calling OpenRouter as fallback")
+            logger.debug(f"Calling OpenRouter with model: {model_to_use}")
             response = requests.post(
                 self.openrouter_url,
                 json=payload,
@@ -140,6 +153,12 @@ class LLMClient:
             )
             response.raise_for_status()
             result = response.json()
+            
+            # 记录token使用量（如果API返回）
+            if "usage" in result:
+                tokens_used = result["usage"].get("total_tokens", 0)
+                logger.debug(f"OpenRouter API used {tokens_used} tokens")
+            
             return result["choices"][0]["message"]["content"].strip()
         except Timeout:
             logger.warning("OpenRouter timeout")
@@ -153,13 +172,16 @@ class LLMClient:
         
         return None
     
-    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, 
+                model_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        生成 LLM 回复，自动降级策略
+        生成 LLM 回复，支持动态模型选择和自动降级策略
         
         Args:
             prompt: 用户提示词
             system_prompt: 系统提示词，可选
+            model_id: 指定的模型ID（如 "deepseek/deepseek-v3.2"），
+                    如果为None则使用默认策略（先Ollama，后OpenRouter兜底）
             
         Returns:
             字典包含：
@@ -168,8 +190,42 @@ class LLMClient:
             - llm_available: LLM 是否可用
             - is_fallback: 是否使用了兜底模型
             - error: 错误信息（如果有）
+            - estimated_tokens: 预估token消耗（基于模型成本映射）
         """
-        # 1. 尝试 Ollama
+        # 构建消息列表
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        # 计算预估token消耗（简化估算）
+        estimated_tokens = 0
+        if model_id and model_id in self.model_cost_map:
+            estimated_tokens = self.model_cost_map[model_id]
+        elif model_id and "stepfun/step-3.5-flash" in model_id:
+            estimated_tokens = 0  # 免费模型
+        
+        # 1. 如果指定了模型ID且是OpenRouter支持的模型
+        if model_id and (model_id.startswith("stepfun/") or 
+                        model_id.startswith("deepseek/") or 
+                        model_id.startswith("anthropic/") or 
+                        model_id.startswith("openai/")):
+            
+            openrouter_response = self._call_openrouter(messages, model_id)
+            if openrouter_response is not None:
+                return {
+                    "text": openrouter_response,
+                    "model": model_id,
+                    "llm_available": True,
+                    "is_fallback": False,
+                    "error": None,
+                    "estimated_tokens": estimated_tokens
+                }
+            else:
+                # 指定的OpenRouter模型失败，降级到默认策略
+                logger.warning(f"指定模型 {model_id} 调用失败，降级到默认策略")
+        
+        # 2. 尝试 Ollama（默认主力）
         ollama_response = self._call_ollama(prompt, system_prompt)
         if ollama_response is not None:
             return {
@@ -177,26 +233,23 @@ class LLMClient:
                 "model": self.ollama_model,
                 "llm_available": True,
                 "is_fallback": False,
-                "error": None
+                "error": None,
+                "estimated_tokens": 0  # 本地模型不计费
             }
         
-        # 2. 尝试 OpenRouter 兜底
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
-        openrouter_response = self._call_openrouter(messages)
+        # 3. 尝试 OpenRouter 默认兜底模型
+        openrouter_response = self._call_openrouter(messages, None)  # 使用默认兜底模型
         if openrouter_response is not None:
             return {
                 "text": openrouter_response,
-                "model": self.openrouter_model,
+                "model": self.default_openrouter_model,
                 "llm_available": True,
                 "is_fallback": True,
-                "error": self.last_error
+                "error": self.last_error,
+                "estimated_tokens": self.model_cost_map.get(self.default_openrouter_model, 0)
             }
         
-        # 3. 全部失败，标记为不可用
+        # 4. 全部失败，标记为不可用
         self.llm_available = False
         logger.error("All LLM providers failed, falling back to mock responses")
         return {
@@ -204,16 +257,19 @@ class LLMClient:
             "model": "none",
             "llm_available": False,
             "is_fallback": True,
-            "error": self.last_error
+            "error": self.last_error,
+            "estimated_tokens": 0
         }
     
-    def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[Dict]:
+    def generate_json(self, prompt: str, system_prompt: Optional[str] = None,
+                    model_id: Optional[str] = None) -> Optional[Dict]:
         """
-        生成 JSON 格式的 LLM 回复，自动解析
+        生成 JSON 格式的 LLM 回复，自动解析，支持动态模型选择
         
         Args:
             prompt: 提示词，要求模型返回 JSON
             system_prompt: 系统提示词，可选
+            model_id: 指定的模型ID
             
         Returns:
             解析后的字典，解析失败或生成失败返回 None
@@ -221,7 +277,7 @@ class LLMClient:
         # 增强系统提示词，要求返回 JSON
         json_system_prompt = (system_prompt or "") + "\n\n请确保你的回复是有效的 JSON 格式。"
         
-        result = self.generate(prompt, json_system_prompt)
+        result = self.generate(prompt, json_system_prompt, model_id)
         if not result["text"]:
             return None
         

@@ -20,6 +20,38 @@ class Database {
   }
 
   init() {
+    // Token 余额表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS user_tokens (
+        user_id TEXT PRIMARY KEY,
+        balance INTEGER DEFAULT 0,
+        purchased_total INTEGER DEFAULT 0,
+        consumed_total INTEGER DEFAULT 0,
+        last_purchase_date DATETIME,
+        last_consumption_date DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Token 使用记录表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        function_name TEXT NOT NULL,       -- 功能名称（如 "ai_screen", "kronos_predict"）
+        model_id TEXT NOT NULL,            -- 使用的模型ID
+        tokens_input INTEGER NOT NULL,     -- 输入token数
+        tokens_output INTEGER NOT NULL,    -- 输出token数
+        tokens_total INTEGER NOT NULL,     -- 总token数
+        cost_usd REAL,                     -- 成本（美元）
+        request_id TEXT,                   -- 请求ID（用于追踪）
+        metadata TEXT,                     -- 额外元数据（JSON格式）
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES user_tokens(user_id)
+      )
+    `);
+
     // 持仓表
     this.db.run(`
       CREATE TABLE IF NOT EXISTS holdings (
@@ -373,6 +405,223 @@ class Database {
         if (err) reject(err);
         else resolve({ deleted: this.changes > 0 });
       });
+    });
+  }
+
+  // ========== Token 管理相关操作 ==========
+
+  // 获取用户Token余额
+  async getUserTokenBalance(userId = 'default') {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT balance, purchased_total, consumed_total, last_purchase_date, last_consumption_date
+         FROM user_tokens WHERE user_id = ?`,
+        [userId],
+        (err, row) => {
+          if (err) reject(err);
+          else if (row) {
+            resolve(row);
+          } else {
+            // 如果用户不存在，创建默认记录
+            this.initializeUserTokens(userId).then(resolve).catch(reject);
+          }
+        }
+      );
+    });
+  }
+
+  // 初始化用户Token记录
+  async initializeUserTokens(userId = 'default') {
+    return new Promise((resolve, reject) => {
+      // 默认赠送10000个token
+      const initialBalance = 10000;
+      this.db.run(
+        `INSERT INTO user_tokens (user_id, balance, purchased_total) VALUES (?, ?, ?)`,
+        [userId, initialBalance, initialBalance],
+        function(err) {
+          if (err) reject(err);
+          else resolve({
+            balance: initialBalance,
+            purchased_total: initialBalance,
+            consumed_total: 0,
+            last_purchase_date: null,
+            last_consumption_date: null
+          });
+        }
+      );
+    });
+  }
+
+  // 扣除Token（记录使用）
+  async deductTokens(userId, usageData) {
+    return new Promise((resolve, reject) => {
+      // 开始事务
+      this.db.serialize(() => {
+        this.db.run('BEGIN TRANSACTION');
+
+        // 1. 插入使用记录
+        this.db.run(
+          `INSERT INTO token_usage 
+           (user_id, function_name, model_id, tokens_input, tokens_output, tokens_total, cost_usd, request_id, metadata) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            usageData.function_name,
+            usageData.model_id,
+            usageData.tokens_input || 0,
+            usageData.tokens_output || 0,
+            usageData.tokens_total || (usageData.tokens_input || 0) + (usageData.tokens_output || 0),
+            usageData.cost_usd || null,
+            usageData.request_id || null,
+            usageData.metadata ? JSON.stringify(usageData.metadata) : null
+          ],
+          function(err) {
+            if (err) {
+              this.db.run('ROLLBACK');
+              reject(err);
+              return;
+            }
+
+            const usageId = this.lastID;
+
+            // 2. 更新用户余额
+            this.db.run(
+              `UPDATE user_tokens 
+               SET balance = balance - ?, 
+                   consumed_total = consumed_total + ?,
+                   last_consumption_date = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE user_id = ? AND balance >= ?`,
+              [
+                usageData.tokens_total || (usageData.tokens_input || 0) + (usageData.tokens_output || 0),
+                usageData.tokens_total || (usageData.tokens_input || 0) + (usageData.tokens_output || 0),
+                userId,
+                usageData.tokens_total || (usageData.tokens_input || 0) + (usageData.tokens_output || 0)
+              ],
+              function(updateErr) {
+                if (updateErr) {
+                  this.db.run('ROLLBACK');
+                  reject(updateErr);
+                  return;
+                }
+
+                if (this.changes === 0) {
+                  // 余额不足
+                  this.db.run('ROLLBACK');
+                  reject(new Error('Insufficient token balance'));
+                  return;
+                }
+
+                // 提交事务
+                this.db.run('COMMIT', (commitErr) => {
+                  if (commitErr) {
+                    this.db.run('ROLLBACK');
+                    reject(commitErr);
+                    return;
+                  }
+
+                  // 获取更新后的余额
+                  this.db.get(
+                    'SELECT balance FROM user_tokens WHERE user_id = ?',
+                    [userId],
+                    (selectErr, row) => {
+                      if (selectErr) {
+                        reject(selectErr);
+                      } else {
+                        resolve({
+                          usage_id: usageId,
+                          new_balance: row.balance,
+                          tokens_deducted: usageData.tokens_total || (usageData.tokens_input || 0) + (usageData.tokens_output || 0)
+                        });
+                      }
+                    }
+                  );
+                });
+              }
+            );
+          }
+        );
+      });
+    });
+  }
+
+  // 充值Token
+  async addTokens(userId, tokens, purchaseMethod = 'system') {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `INSERT INTO user_tokens (user_id, balance, purchased_total) 
+         VALUES (?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET 
+         balance = balance + ?,
+         purchased_total = purchased_total + ?,
+         last_purchase_date = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP`,
+        [userId, tokens, tokens, tokens, tokens],
+        function(err) {
+          if (err) reject(err);
+          else {
+            this.db.get(
+              'SELECT balance FROM user_tokens WHERE user_id = ?',
+              [userId],
+              (selectErr, row) => {
+                if (selectErr) reject(selectErr);
+                else resolve({
+                  new_balance: row.balance,
+                  tokens_added: tokens,
+                  purchase_method: purchaseMethod
+                });
+              }
+            );
+          }
+        }
+      );
+    });
+  }
+
+  // 获取Token使用历史记录
+  async getTokenUsageHistory(userId = 'default', limit = 50, offset = 0) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT * FROM token_usage 
+         WHERE user_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT ? OFFSET ?`,
+        [userId, limit, offset],
+        (err, rows) => {
+          if (err) reject(err);
+          else {
+            // 解析metadata JSON
+            const parsedRows = rows.map(row => ({
+              ...row,
+              metadata: row.metadata ? JSON.parse(row.metadata) : null
+            }));
+            resolve(parsedRows);
+          }
+        }
+      );
+    });
+  }
+
+  // 获取Token使用统计
+  async getTokenUsageStats(userId = 'default', days = 30) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT 
+           date(created_at) as date,
+           model_id,
+           function_name,
+           SUM(tokens_total) as total_tokens,
+           COUNT(*) as request_count
+         FROM token_usage 
+         WHERE user_id = ? AND datetime(created_at) > datetime('now', ?)
+         GROUP BY date(created_at), model_id, function_name
+         ORDER BY date DESC`,
+        [userId, `-${days} days`],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        }
+      );
     });
   }
 

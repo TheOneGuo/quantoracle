@@ -1,0 +1,44 @@
+# QuantConnect Lean 官方镜像
+# 文档：https://github.com/QuantConnect/Lean
+version: '3.8'
+
+services:
+  lean:
+    image: quantconnect/lean:latest
+    ports:
+      - "5000:5000"  # Lean API端口
+    volumes:
+      - ./data:/Lean/Data           # 历史数据挂载
+      - ./strategies:/Lean/Algorithm # 策略代码挂载
+      - ./results:/Lean/Results      # 回测结果挂载
+      - ./config:/Lean/Config        # 配置文件挂载
+    environment:
+      - PYTHONPATH=/Lean/Algorithm
+    restart: unless-stopped
+    networks:
+      - quantoracle-net
+
+  bridge:
+    build: .
+    ports:
+      - "8766:8766"  # 回测桥接API端口
+    volumes:
+      - ./data_converter:/app/data_converter
+      - ./strategy_templates:/app/strategy_templates
+      - ./strategies:/app/strategies
+      - ./results:/app/results
+      - ./config:/app/config
+    depends_on:
+      - lean
+    environment:
+      - LEAN_API_URL=http://lean:5000
+      - LEAN_DATA_DIR=/Lean/Data
+      - LEAN_RESULTS_DIR=/Lean/Results
+      - DATA_SOURCE_BACKEND=http://quantoracle-backend:3001/api/kline/
+    restart: unless-stopped
+    networks:
+      - quantoracle-net
+
+networks:
+  quantoracle-net:
+    driver: bridge
