@@ -14,6 +14,7 @@ import BrokerPanel from './components/BrokerPanel'
 import AuthPanel from './components/AuthPanel'
 import MarketplacePage from './components/MarketplacePage'
 import UsagePanel from './components/UsagePanel'
+import NewsFlash from './components/NewsFlash'
 import { useAuth } from './hooks/useAuth'
 import './App.css'
 
@@ -1239,6 +1240,13 @@ function App() {
           >
             📚 知识库
           </button>
+          <button
+            className="btn-hot-stock-analysis"
+            onClick={() => navigate('/news')}
+            style={{ background: '#065f46' }}
+          >
+            📰 新闻
+          </button>
           {location.pathname === '/' ? (
             <button
               className="btn-hot-stock-analysis"
@@ -1280,6 +1288,11 @@ function App() {
         <Route path="/paradigms" element={<ParadigmEditor />} />
         <Route path="/broker" element={<BrokerPanel />} />
         <Route path="/marketplace" element={<MarketplacePage user={user} />} />
+        <Route path="/news" element={
+          <div style={{ padding: '16px', maxWidth: '900px', margin: '0 auto' }}>
+            <NewsFlash />
+          </div>
+        } />
       </Routes>
 
       {/* 移动端底部 TabBar */}

@@ -1,0 +1,213 @@
+.news-flash {
+  background: #0f1117;
+  border: 1px solid #1e2538;
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.news-compact {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.news-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #141820;
+  border-bottom: 1px solid #1e2538;
+}
+
+.news-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+  flex: 1;
+}
+
+.news-update-time {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.news-refresh {
+  background: none;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.news-refresh:hover:not(:disabled) {
+  background: #1e2538;
+  color: #e2e8f0;
+}
+
+.news-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.news-tabs {
+  display: flex;
+  border-bottom: 1px solid #1e2538;
+  background: #141820;
+}
+
+.news-tabs button {
+  flex: 1;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.news-tabs button:hover {
+  color: #94a3b8;
+  background: #1e2538;
+}
+
+.news-tabs button.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.news-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.news-compact .news-list {
+  max-height: none;
+}
+
+.news-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid #0d1117;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.news-item:hover {
+  background: #141820;
+}
+
+.news-item:last-child {
+  border-bottom: none;
+}
+
+.news-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.news-time {
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.news-source {
+  font-size: 11px;
+  color: #475569;
+  background: #1e2538;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.news-symbol {
+  font-size: 11px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.news-title {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cbd5e1;
+}
+
+.news-title-positive {
+  color: #4ade80;
+}
+
+.news-title-negative {
+  color: #f87171;
+}
+
+.news-content {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #1e2538;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+.news-content a {
+  color: #3b82f6;
+  text-decoration: none;
+  font-size: 12px;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.news-content a:hover {
+  text-decoration: underline;
+}
+
+.news-loading,
+.news-error,
+.news-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: #475569;
+}
+
+.news-error {
+  color: #f87171;
+}
+
+/* 移动端响应式 */
+@media (max-width: 640px) {
+  .news-header {
+    padding: 8px 10px;
+  }
+
+  .news-item {
+    padding: 8px 10px;
+  }
+
+  .news-title {
+    font-size: 12px;
+  }
+
+  .news-tabs button {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .news-list {
+    max-height: 400px;
+  }
+}

@@ -1814,6 +1814,49 @@ app.post('/api/marketplace/strategies/:id/track', authRequired, (req, res) => {
   }
 });
 
+// ────────────────────────────────────────────────────────────────
+// 新闻路由 - 代理到 AKShare Python 微服务 (:8767)
+// GET /api/news/market     市场综合快讯（财新）
+// GET /api/news/flash      财经电报（央视/财新）
+// GET /api/news/stock/:code  个股相关新闻（东方财富）
+// ────────────────────────────────────────────────────────────────
+const NEWS_SERVICE_URL = process.env.NEWS_SERVICE_URL || 'http://localhost:8767';
+
+const MOCK_NEWS = [
+  { title: '市场快讯：沪指震荡上行，科技板块领涨', content: 'A股市场今日呈震荡上行态势，科技、新能源板块表现强势。', url: '', published_at: new Date().toISOString(), source_name: 'Mock数据' },
+  { title: '央行货币政策：保持流动性合理充裕', content: '中国人民银行表示将继续保持货币政策稳健，维护流动性合理充裕。', url: '', published_at: new Date().toISOString(), source_name: 'Mock数据' },
+  { title: '利好消息：外资持续流入A股市场', content: '北向资金今日净流入超过50亿元，外资看好中国股市长期发展前景。', url: '', published_at: new Date().toISOString(), source_name: 'Mock数据' },
+  { title: '政策扶持：新能源汽车补贴政策延续', content: '国家发改委宣布新能源汽车补贴政策延续至2027年，利好相关产业链。', url: '', published_at: new Date().toISOString(), source_name: 'Mock数据' },
+  { title: '警示：部分地区房市出现下跌压力', content: '多个城市房地产市场出现成交量下滑，市场观望情绪较浓。', url: '', published_at: new Date().toISOString(), source_name: 'Mock数据' },
+];
+
+async function proxyNews(path, res) {
+  try {
+    const response = await fetch(`${NEWS_SERVICE_URL}${path}`, { signal: AbortSignal.timeout(8000) });
+    const data = await response.json();
+    return res.json(data);
+  } catch (e) {
+    console.warn(`[news] proxy failed (${path}): ${e.message}, returning mock`);
+    return res.json({ success: true, count: MOCK_NEWS.length, source: 'mock', data: MOCK_NEWS });
+  }
+}
+
+app.get('/api/news/market', async (req, res) => {
+  const count = req.query.count || 30;
+  await proxyNews(`/news/market?count=${count}`, res);
+});
+
+app.get('/api/news/flash', async (req, res) => {
+  const count = req.query.count || 20;
+  await proxyNews(`/news/flash?count=${count}`, res);
+});
+
+app.get('/api/news/stock/:code', async (req, res) => {
+  const code = req.params.code;
+  const count = req.query.count || 20;
+  await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
+});
+
 // 优雅关闭
 process.on('SIGINT', () => {
   console.log('\nClosing database connection...');
