@@ -1498,10 +1498,23 @@ app.get('/api/marketplace/strategies', (req, res) => {
 });
 
 /**
- * 获取策略详情
+ * 获取策略详情（先查数据库，fallback 到 mock）
  */
 app.get('/api/marketplace/strategies/:id', (req, res) => {
-  const mock = MOCK_STRATEGIES.find(s => s.id === req.params.id);
+  const { id } = req.params;
+  try {
+    const row = db.db && db.db.prepare('SELECT * FROM strategies WHERE id = ?').get(id);
+    if (row) {
+      const strategy = {
+        ...row,
+        backtest_metrics: typeof row.backtest_metrics === 'string' ? JSON.parse(row.backtest_metrics || '{}') : row.backtest_metrics,
+        live_metrics: typeof row.live_metrics === 'string' ? JSON.parse(row.live_metrics || '{}') : row.live_metrics,
+        tags: typeof row.tags === 'string' ? JSON.parse(row.tags || '[]') : row.tags,
+      };
+      return res.json({ success: true, strategy });
+    }
+  } catch (e) { /* ignore, fallback below */ }
+  const mock = MOCK_STRATEGIES.find(s => s.id === id);
   res.json({ success: true, strategy: mock || null, is_mock: true });
 });
 
@@ -1568,6 +1581,171 @@ app.post('/api/marketplace/strategies/:id/recalculate-grade', (req, res) => {
   if (!strategy) return res.status(404).json({ success: false, error: '策略不存在' });
   const grade = calculateGrade(strategy, strategy.live_metrics);
   res.json({ success: true, id: req.params.id, old_grade: strategy.grade, new_grade: grade });
+});
+
+// =============================================
+// 策略广场补充路由（M3 扩展）
+// =============================================
+
+/**
+ * 我发布的策略（需要认证）
+ * @route GET /api/marketplace/my-strategies
+ */
+app.get('/api/marketplace/my-strategies', authRequired, (req, res) => {
+  const user_id = req.user.id;
+  try {
+    const rows = db.db.prepare(
+      'SELECT * FROM strategies WHERE creator_id = ? ORDER BY created_at DESC'
+    ).all(user_id);
+    const strategies = rows.map(s => ({
+      ...s,
+      backtest_metrics: typeof s.backtest_metrics === 'string' ? JSON.parse(s.backtest_metrics || '{}') : s.backtest_metrics,
+      live_metrics: typeof s.live_metrics === 'string' ? JSON.parse(s.live_metrics || '{}') : s.live_metrics,
+      tags: typeof s.tags === 'string' ? JSON.parse(s.tags || '[]') : s.tags,
+    }));
+    res.json({ success: true, strategies });
+  } catch (e) {
+    res.json({ success: true, strategies: [], error: e.message });
+  }
+});
+
+/**
+ * 我的订阅（需要认证）
+ * @route GET /api/marketplace/my-subscriptions
+ */
+app.get('/api/marketplace/my-subscriptions', authRequired, (req, res) => {
+  const user_id = req.user.id;
+  try {
+    const rows = db.db.prepare(`
+      SELECT sub.*, s.name as strategy_name, s.style, s.grade, s.backtest_metrics, s.live_metrics
+      FROM subscriptions sub
+      LEFT JOIN strategies s ON sub.strategy_id = s.id
+      WHERE sub.user_id = ?
+      ORDER BY sub.created_at DESC
+    `).all(user_id);
+    const subscriptions = rows.map(s => ({
+      ...s,
+      backtest_metrics: typeof s.backtest_metrics === 'string' ? JSON.parse(s.backtest_metrics || '{}') : s.backtest_metrics,
+      live_metrics: typeof s.live_metrics === 'string' ? JSON.parse(s.live_metrics || '{}') : s.live_metrics,
+    }));
+    res.json({ success: true, subscriptions });
+  } catch (e) {
+    res.json({ success: true, subscriptions: [], error: e.message });
+  }
+});
+
+/**
+ * 评价策略（需要认证，每用户只能评价一次）
+ * @route POST /api/marketplace/strategies/:id/review
+ */
+app.post('/api/marketplace/strategies/:id/review', authRequired, (req, res) => {
+  const strategy_id = req.params.id;
+  const user_id = req.user.id;
+  const { rating, comment } = req.body;
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ success: false, error: 'rating 需在 1-5 之间' });
+  }
+  try {
+    db.db.prepare(`
+      INSERT INTO strategy_reviews (strategy_id, user_id, rating, comment)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(strategy_id, user_id) DO UPDATE SET rating=excluded.rating, comment=excluded.comment
+    `).run(strategy_id, user_id, Number(rating), comment || '');
+    res.json({ success: true, message: '评价已提交' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 获取策略评价列表（公开）
+ * @route GET /api/marketplace/strategies/:id/reviews
+ */
+app.get('/api/marketplace/strategies/:id/reviews', (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (Number(page) - 1) * Number(limit);
+  try {
+    const rows = db.db.prepare(
+      'SELECT * FROM strategy_reviews WHERE strategy_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(req.params.id, Number(limit), offset);
+    const total = db.db.prepare('SELECT COUNT(*) as cnt FROM strategy_reviews WHERE strategy_id = ?').get(req.params.id);
+    res.json({ success: true, reviews: rows, total: total?.cnt || 0, page: Number(page) });
+  } catch (e) {
+    res.json({ success: true, reviews: [], total: 0, error: e.message });
+  }
+});
+
+/**
+ * 更新策略信息（仅创作者）
+ * @route PATCH /api/marketplace/strategies/:id
+ */
+app.patch('/api/marketplace/strategies/:id', authRequired, (req, res) => {
+  const user_id = req.user.id;
+  const { id } = req.params;
+  try {
+    const row = db.db.prepare('SELECT creator_id FROM strategies WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ success: false, error: '策略不存在' });
+    if (row.creator_id !== user_id) return res.status(403).json({ success: false, error: '只能修改自己的策略' });
+
+    const { description, price_monthly, price_yearly, tags } = req.body;
+    db.db.prepare(`
+      UPDATE strategies SET
+        description = COALESCE(?, description),
+        price_monthly = COALESCE(?, price_monthly),
+        price_yearly = COALESCE(?, price_yearly),
+        tags = COALESCE(?, tags)
+      WHERE id = ?
+    `).run(
+      description ?? null,
+      price_monthly ?? null,
+      price_yearly ?? null,
+      tags ? JSON.stringify(tags) : null,
+      id
+    );
+    res.json({ success: true, message: '策略信息已更新' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 下架策略（软删除，仅创作者）
+ * @route DELETE /api/marketplace/strategies/:id
+ */
+app.delete('/api/marketplace/strategies/:id', authRequired, (req, res) => {
+  const user_id = req.user.id;
+  const { id } = req.params;
+  try {
+    const row = db.db.prepare('SELECT creator_id, status FROM strategies WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ success: false, error: '策略不存在' });
+    if (row.creator_id !== user_id) return res.status(403).json({ success: false, error: '只能下架自己的策略' });
+    db.db.prepare("UPDATE strategies SET status = 'delisted' WHERE id = ?").run(id);
+    res.json({ success: true, message: '策略已下架' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 记录实盘跟踪（需要认证）
+ * @route POST /api/marketplace/strategies/:id/track
+ */
+app.post('/api/marketplace/strategies/:id/track', authRequired, (req, res) => {
+  const strategy_id = req.params.id;
+  const user_id = req.user.id;
+  const { subscription_id, signal_id, action, code, price, quantity, pnl, pnl_percent } = req.body;
+  if (!action || !code) {
+    return res.status(400).json({ success: false, error: '缺少必填字段: action/code' });
+  }
+  try {
+    const result = db.db.prepare(`
+      INSERT INTO live_tracking (user_id, strategy_id, subscription_id, signal_id, action, code, price, quantity, pnl, pnl_percent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(user_id, strategy_id, subscription_id || null, signal_id || null, action, code, price || 0, quantity || 0, pnl || 0, pnl_percent || 0);
+    res.json({ success: true, id: result.lastInsertRowid, message: '实盘跟踪记录已保存' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // 优雅关闭

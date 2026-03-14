@@ -250,10 +250,12 @@ class Database {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         strategy_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
-        rating INTEGER NOT NULL,          -- 1-5
+        rating INTEGER CHECK(rating BETWEEN 1 AND 5),
         comment TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+        UNIQUE(strategy_id, user_id),
+        FOREIGN KEY (strategy_id) REFERENCES strategies(id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
       )
     `);
   }

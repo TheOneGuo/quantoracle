@@ -12,6 +12,7 @@ import Watchlist from './components/Watchlist'
 import ParadigmEditor from './components/ParadigmEditor'
 import BrokerPanel from './components/BrokerPanel'
 import AuthPanel from './components/AuthPanel'
+import MarketplacePage from './components/MarketplacePage'
 import { useAuth } from './hooks/useAuth'
 import './App.css'
 
@@ -1134,6 +1135,10 @@ function App() {
     navigate('/strategy')
   }
 
+  const goToMarketplace = () => {
+    navigate('/marketplace')
+  }
+
   const goToParadigms = () => {
     navigate('/paradigms')
   }
@@ -1213,6 +1218,13 @@ function App() {
           </button>
           <button
             className="btn-hot-stock-analysis"
+            onClick={goToMarketplace}
+            style={{ background: '#744210' }}
+          >
+            🏛 策略广场
+          </button>
+          <button
+            className="btn-hot-stock-analysis"
             onClick={goToParadigms}
             style={{ background: '#1a4d8a' }}
           >
@@ -1258,6 +1270,7 @@ function App() {
         <Route path="/strategy" element={<StrategyTemplates />} />
         <Route path="/paradigms" element={<ParadigmEditor />} />
         <Route path="/broker" element={<BrokerPanel />} />
+        <Route path="/marketplace" element={<MarketplacePage user={user} />} />
       </Routes>
 
       {/* 移动端底部 TabBar */}
@@ -1279,6 +1292,7 @@ function MobileTabBar({ location, navigate }) {
     { path: '/analysis', icon: '🔥', label: '选股' },
     { path: '/cloudmap', icon: '📊', label: '云图' },
     { path: '/strategy', icon: '📋', label: '策略' },
+    { path: '/marketplace', icon: '🏛', label: '广场' },
     { path: '/broker', icon: '💼', label: '实盘' },
   ]
 
