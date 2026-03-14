@@ -1,113 +1,130 @@
 # 新闻数据管道基准测试报告
 
-> 测试时间：2026-03-14 12:32
-> 环境：QuantOracle 生产服务器（中国大陆）
+> 最后更新：2026-03-14 12:45 CST
+> 测试环境：Linux (阿里云 iZ0joezeoknnd7zq4s73yxZ)，Node.js v22.22.1
+
+## 测试概况
+
+| 项目 | 值 |
+|------|-----|
+| 总测试源数 | 13 (12 RSS + 1 JSON API) |
+| 可用源数 | **10** |
+| 不可用源数 | 3 (IP封锁) |
+| 中文源可用 | 1（同花顺 JSON API） |
+| 英文源可用 | 9（RSS） |
+| 平均延迟 | 647ms |
+| 最快源 | Yahoo Finance News (50ms) |
+| 最慢源 | 同花顺财经 (2244ms, curl) |
 
 ---
 
-## 一、新闻源可达性测试结果
+## ✅ 可用数据源详情
 
-| 名称 | 类别 | 状态 | 响应时间 | 最新新闻 | 备注 |
-|------|------|------|----------|----------|------|
-| CoinTelegraph | CRYPTO | ✅ 可用 | 119ms | 3小时前 | 最快 |
-| Yahoo Finance | US | ✅ 可用 | 205ms | 1分钟前 | 时效性最佳 |
-| CNBC Markets | US | ✅ 可用 | 338ms | 4小时前 | 稳定 |
-| 美联储 | MACRO | ✅ 可用 | 446ms | — | 官方 |
-| MarketWatch | US | ✅ 可用 | 922ms | 275天前 | 数据陈旧 |
-| Seeking Alpha | US | ✅ 可用 | 2108ms | 3分钟前 | 最慢 |
-| 腾讯财经 | CN | ⚠️ 异常 | — | — | 200但非XML |
-| Financial Times | GLOBAL | ❌ 不可用 | — | — | 重定向失败(HTTPS) |
-| CoinDesk | CRYPTO | ❌ 不可用 | — | — | 308重定向失败 |
-| IMF | MACRO | 🔒 封锁 | — | — | 403 Forbidden |
-| SEC Press | REGULATORY | 🔒 封锁 | — | — | 403 Forbidden |
-| 新浪财经 | CN | ❌ 不可用 | — | — | 404 URL已失效 |
-| 华尔街见闻 | CN | ❌ 不可用 | — | — | 404 URL已失效 |
-| Kitco Gold | COMMODITY | ❌ 不可用 | — | — | 404 URL已失效 |
+### RSS 格式（英文）
 
-### 汇总
+| 源名称 | URL | 分类 | 延迟 | 最新内容时间 | 备注 |
+|--------|-----|------|------|-------------|------|
+| CNBC Markets | `https://www.cnbc.com/id/100003114/device/rss/rss.html` | US | ~340ms | 4小时前 | 稳定，无需特殊头 |
+| MarketWatch | `https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines` | US | ~1600ms | -（pubDate异常） | Dow Jones官方，内容实时 |
+| **Yahoo Finance** | `https://finance.yahoo.com/rss/topstories` | US | ~172ms | **5分钟前** | 推荐，实时性最佳 |
+| **Yahoo Finance News** | `https://finance.yahoo.com/news/rssindex` | US | **50ms** | **4分钟前** | **最快+最新，首选** |
+| Financial Times | `https://www.ft.com/rss/home/international` | GLOBAL | ~529ms | 4小时前 | 需跟随301重定向 |
+| Seeking Alpha | `https://seekingalpha.com/feed.xml` | US | ~846ms | 13分钟前 | 分析深度好 |
+| CoinDesk | `https://www.coindesk.com/arc/outboundfeeds/rss` | CRYPTO | ~153ms | 1小时前 | 需跟随308重定向 |
+| CoinTelegraph | `https://cointelegraph.com/rss` | CRYPTO | ~138ms | 3小时前 | 稳定 |
+| 美联储 | `https://www.federalreserve.gov/feeds/press_all.xml` | MACRO | ~394ms | N/A | 低频高权威 |
 
-| 指标 | 数值 |
-|------|------|
-| 可用源 | 6 / 14（43%） |
-| 平均延迟 | 690ms |
-| 最快源 | CoinTelegraph（119ms） |
-| 最慢源 | Seeking Alpha（2108ms） |
+### JSON API 格式（中文）
+
+| 源名称 | URL | 分类 | 延迟 | 数据格式 | 特殊要求 |
+|--------|-----|------|------|---------|---------|
+| **同花顺财经** | `https://news.10jqka.com.cn/tapp/news/push/stock/?page=1&tag=&track=website&pagesize=20` | CN | ~2244ms | JSON `{code, data:{list}}` | 需curl或特定HTTP客户端，Node.js直连ETIMEDOUT |
 
 ---
 
-## 二、推荐新闻源优先级
+## ❌ 不可用源 - 此轮新测结果
 
-基于响应速度 + 时效性综合评分：
+### 服务器IP封锁（403）
+| 源 | URL | 原因 |
+|----|-----|------|
+| Mining.com Gold | `https://www.mining.com/feed/` | HTTP 403（国内IP被封锁，需海外代理） |
+| IMF | `https://www.imf.org/en/News/rss?language=eng` | HTTP 403（IP封锁） |
+| SEC Press | `https://www.sec.gov/rss/news/press.xml` | HTTP 403（IP封锁） |
 
-| 优先级 | 源 | 理由 |
-|--------|-----|------|
-| 🥇 1 | Yahoo Finance | 速度快(205ms)、时效性最佳(1分钟前) |
-| 🥈 2 | CoinTelegraph | 最快(119ms)、加密市场全覆盖 |
-| 🥉 3 | CNBC Markets | 稳定、综合财经覆盖 |
-| 4 | 美联储 | 权威宏观政策信号 |
-| 5 | Seeking Alpha | 时效性好但速度慢，适合非实时场景 |
+### 彻底失效的旧URL
 
-### 待修复源（需更新URL）
-
-- **新浪财经**：URL已失效，建议改用 `https://rss.sina.com.cn/roll/finance/gnss/index.d.1.rss`
-- **华尔街见闻**：建议使用官方API或其他聚合源
-- **Kitco Gold**：建议改用 `https://www.kitco.com/rss/`
-- **CoinDesk**：需跟随308重定向，建议更新URL
-- **FT / IMF / SEC**：需配置反爬头或使用付费API
+| 源 | 旧URL | 状态 | 测试日期 |
+|----|-------|------|---------|
+| 新浪财经 | `https://feed.sina.com.cn/news/finance/mix.xml` | 404 | 2026-03-14 |
+| 新浪财经(所有备选) | `rss.sina.com.cn/*` | 404 | 2026-03-14 |
+| 华尔街见闻RSS | `https://wallstreetcn.com/feed` | 404 | 2026-03-14 |
+| 华尔街见闻API | `https://api.wallstreetcn.com/apiv1/content/lives` | 200 但items为空（需cookie） | 2026-03-14 |
+| 腾讯财经RSS | `https://new.qq.com/rss/finance.xml` | 200 但非RSS XML | 2026-03-14 |
+| 腾讯财经API | `https://pacaio.match.qq.com/irs/rcd?cid=137` | 200 但data为空（需token） | 2026-03-14 |
+| Kitco Gold（所有路径） | `https://www.kitco.com/rss/*` | 404 | 2026-03-14 |
+| 东方财富 | `https://np-cj.eastmoney.com/cj/get_gglist` | 302循环重定向 | 2026-03-14 |
+| 财联社 | `https://www.cls.cn/api/sw?...` | 405 Method Not Allowed | 2026-03-14 |
+| 雪球 | `https://xueqiu.com/v4/statuses/...` | 需xq_a_token cookie | 2026-03-14 |
+| 金十数据 | `https://flash-api.jin10.com/get_flash_list` | 需认证App-Id，连接失败 | 2026-03-14 |
+| Reuters | `https://feeds.reuters.com/reuters/businessNews` | 连接超时 | 2026-03-14 |
 
 ---
 
-## 三、StepFun step-3.5-flash:free 分析速度基准
+## 🏗️ 推荐实时数据流方案
 
-> ⚠️ 注意：本次测试未能获取真实数据，因 `OPENROUTER_API_KEY` 未配置
+### 方案一：混合拉取（推荐，当前可实现）
 
-### 预估基准数据（基于OpenRouter free tier典型性能）
-
-| 指标 | 预估值 |
-|------|--------|
-| 首Token延迟 | 800 ~ 1500ms |
-| 总响应时间 | 2000 ~ 4000ms |
-| 输出tokens/次 | 80 ~ 120 |
-| 并发限制 | free tier约3 RPM |
-
-### 真实测试命令
-
-```bash
-OPENROUTER_API_KEY=your_key node scripts/test-stepfun-analysis.js
+```
+┌─────────────────────────────────────────────────────┐
+│  QuantOracle 新闻聚合管道                             │
+├─────────────────────────────────────────────────────┤
+│  英文RSS（每5分钟轮询）                               │
+│  ├── Yahoo Finance News（50ms，最快）                  │
+│  ├── CNBC Markets（340ms）                            │
+│  ├── CoinDesk / CoinTelegraph（加密）                  │
+│  └── Financial Times / Seeking Alpha（深度）           │
+│                                                     │
+│  中文JSON（每2分钟轮询，curl方式）                     │
+│  └── 同花顺财经（实时财经快讯）                        │
+│                                                     │
+│  低频权威源（每30分钟）                               │
+│  └── 美联储（监管/政策）                              │
+└─────────────────────────────────────────────────────┘
 ```
 
----
+### 方案二：WebSocket/SSE 实时推送（高级，待接入）
 
-## 四、综合建议
+- **华尔街见闻** - 支持WebSocket，需用户认证token
+- **财联社** - 有内部WS接口，需逆向或合作
+- **同花顺** - 移动端有长连接推送
 
-### 新闻抓取策略
+### 方案三：第三方新闻聚合API
 
-| 场景 | 推荐源 | 抓取频率 |
-|------|--------|----------|
-| 实时监控（<5分钟） | Yahoo Finance、CoinTelegraph | 每5分钟 |
-| 定时批量（每小时） | + CNBC Markets、Seeking Alpha | 每60分钟 |
-| 宏观政策监控 | 美联储（较低频率） | 每4小时 |
-
-### StepFun 使用建议
-
-基于free tier的预估延迟（首token ~1s，总响应 ~3s）：
-
-- **适合**：批量新闻定时分析（非实时）、每小时处理积压新闻
-- **不适合**：毫秒级实时预警（延迟过高）
-- **建议**：生产环境升级至付费tier，可降至 首token <500ms
-
-### 成本估算
-
-| 场景 | 每日调用量 | 预估成本（付费tier） |
-|------|------------|---------------------|
-| 基础监控（6源×12次/天） | ~72次 | ~$0.01 |
-| 完整覆盖（14源×24次/天） | ~336次 | ~$0.05 |
+| 服务 | 优点 | 缺点 |
+|------|------|------|
+| [NewsAPI.org](https://newsapi.org) | 覆盖广，有中文源 | 免费版100次/天 |
+| [RapidAPI Finance](https://rapidapi.com) | 多种金融新闻API | 收费 |
+| [Alpha Vantage News](https://www.alphavantage.co) | 含情感分析 | API Key，限速 |
 
 ---
 
-## 五、问题记录
+## 📝 已修复内容（2026-03-14）
 
-1. **OPENROUTER_API_KEY 未配置**：StepFun真实测试无法执行，需在 `/tmp/quantoracle/backend/.env` 配置
-2. **中文财经RSS大量失效**：新浪/腾讯/华尔街见闻的RSS URL均已更改，需更新
-3. **SEC/IMF封锁**：政府机构源封锁来自中国的IP，需走代理或使用API替代
-4. **服务器网络限制**：部分海外源（FT等）重定向处理存在问题，建议增加redirect跟随逻辑
+1. **新浪财经** → 所有RSS备选URL均404，无可用替代（新浪已全面关闭RSS服务）
+2. **华尔街见闻** → RSS下线，API需登录cookie，暂标记为disabled
+3. **腾讯财经** → RSS失效，API需token，暂标记为disabled
+4. **Kitco Gold** → 所有RSS路径404，替换为 Mining.com（但国内IP 403，需代理）
+5. **新增同花顺财经** → JSON API可用，已接入，需curl方式获取
+6. **Financial Times** → URL修正为 `/rss/home/international`（原URL 301重定向）
+7. **CoinDesk** → URL修正（去掉末尾斜杠）解决308重定向问题
+
+---
+
+## 🔧 运行测试
+
+```bash
+cd /tmp/quantoracle
+node scripts/test-news-sources.js
+```
+
+配置文件：`backend/src/config/news-sources.js`
