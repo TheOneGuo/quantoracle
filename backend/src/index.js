@@ -31,12 +31,76 @@ app.locals.db = db.db; // 将原始 SQLite db 实例挂到 app.locals，供 brok
 app.use(cors());
 app.use(express.json());
 
+// M6：初始化认证中间件
+const createAuthMiddleware = require('./auth/auth-middleware');
+const AuthService = require('./auth/auth-service');
+const { authRequired, authOptional, authService } = createAuthMiddleware(db);
+
 // 自选股 & A股筛选路由
 watchlistRoutes(app, db, stockAPI);
 
-// 实盘对接路由（M5）
+// =============================================
+// M6：JWT 认证路由
+// =============================================
+
+/**
+ * 用户注册
+ * @route POST /api/auth/register
+ * @body {string} username - 用户名（3-20字符）
+ * @body {string} password - 密码（至少6字符）
+ */
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await authService.register(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 用户登录
+ * @route POST /api/auth/login
+ * @body {string} username
+ * @body {string} password
+ * @returns {{ token: string, user: Object }}
+ */
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await authService.login(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(401).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 获取当前用户信息（需要认证）
+ * @route GET /api/auth/me
+ */
+app.get('/api/auth/me', authRequired, async (req, res) => {
+  try {
+    const user = await authService.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, error: '用户不存在' });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 登出（前端清除 token 即可，后端返回成功）
+ * @route POST /api/auth/logout
+ */
+app.post('/api/auth/logout', (req, res) => {
+  res.json({ success: true, message: '已登出，请在前端清除 token' });
+});
+
+// 实盘对接路由（M5）- 需要认证
 const brokerRoutes = require('./broker/broker-routes');
-app.use('/api/broker', brokerRoutes);
+app.use('/api/broker', authRequired, brokerRoutes);
 
 /**
  * 计算持仓汇总信息
@@ -138,19 +202,20 @@ app.post('/api/stocks/batch', async (req, res) => {
  * 添加持仓（支持多次买入）
  * 提交后立即运行交易规则
  */
-app.post('/api/holdings', async (req, res) => {
+app.post('/api/holdings', authOptional, async (req, res) => {
   try {
     const { code, name, trades } = req.body;
+    const userId = req.user ? req.user.id : DEFAULT_USER_ID;
     
     // 保存到数据库
-    await db.addHolding(code, name);
+    await db.addHolding(code, name, userId);
     
     for (const trade of trades) {
-      await db.addTrade(code, trade.buyPrice, trade.quantity, trade.buyDate);
+      await db.addTrade(code, trade.buyPrice, trade.quantity, trade.buyDate, userId);
     }
     
     // 获取最新持仓数据
-    const holdings = await db.getHoldings();
+    const holdings = await db.getHoldings(userId);
     const holding = holdings.find(h => h.code === code);
     
     // 获取实时股价
@@ -176,22 +241,21 @@ app.post('/api/holdings', async (req, res) => {
  * 为已有持仓添加交易记录（买入/卖出）
  * 提交后立即运行交易规则
  */
-app.post('/api/holdings/:code/trades', async (req, res) => {
+app.post('/api/holdings/:code/trades', authOptional, async (req, res) => {
   try {
     const { code } = req.params;
     const { buyPrice, sellPrice, quantity, buyDate, sellDate, type } = req.body;
+    const userId = req.user ? req.user.id : DEFAULT_USER_ID;
     
     // 判断是买入还是卖出
     if (type === 'sell' && sellPrice) {
-      // 卖出操作
-      await db.addSellTrade(code, sellPrice, quantity, sellDate);
+      await db.addSellTrade(code, sellPrice, quantity, sellDate, userId);
     } else {
-      // 买入操作
-      await db.addTrade(code, buyPrice, quantity, buyDate);
+      await db.addTrade(code, buyPrice, quantity, buyDate, userId);
     }
     
     // 获取最新持仓数据
-    const holdings = await db.getHoldings();
+    const holdings = await db.getHoldings(userId);
     const holding = holdings.find(h => h.code === code);
     
     // 获取实时股价
@@ -216,10 +280,11 @@ app.post('/api/holdings/:code/trades', async (req, res) => {
 /**
  * 删除持仓
  */
-app.delete('/api/holdings/:code', async (req, res) => {
+app.delete('/api/holdings/:code', authOptional, async (req, res) => {
   try {
     const { code } = req.params;
-    await db.deleteHolding(code);
+    const userId = req.user ? req.user.id : DEFAULT_USER_ID;
+    await db.deleteHolding(code, userId);
     res.json({ success: true, message: 'Holding deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -242,10 +307,11 @@ app.delete('/api/trades/:tradeId', async (req, res) => {
 /**
  * 获取持仓列表及分析
  */
-app.get('/api/holdings', async (req, res) => {
+app.get('/api/holdings', authOptional, async (req, res) => {
   try {
+    const userId = req.user ? req.user.id : DEFAULT_USER_ID;
     // 从数据库获取持仓
-    const holdings = await db.getHoldings();
+    const holdings = await db.getHoldings(userId);
     const codes = holdings.map(h => h.code);
     
     // 获取实时数据
@@ -1463,10 +1529,11 @@ app.post('/api/marketplace/strategies', (req, res) => {
 });
 
 /**
- * 订阅策略
+ * 订阅策略（需要认证）
  */
-app.post('/api/marketplace/subscribe', (req, res) => {
-  const { strategy_id, plan = 'monthly', user_id = DEFAULT_USER_ID } = req.body;
+app.post('/api/marketplace/subscribe', authRequired, (req, res) => {
+  const { strategy_id, plan = 'monthly' } = req.body;
+  const user_id = req.user.id; // M6: 从认证信息获取用户ID
   const strategy = MOCK_STRATEGIES.find(s => s.id === strategy_id) || {};
   const amount = plan === 'yearly' ? (strategy.price_yearly || 0) : (strategy.price_monthly || 0);
   const commission_rate = strategy.commission_rate || 0.20;

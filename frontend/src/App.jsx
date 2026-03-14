@@ -11,6 +11,8 @@ import StrategyTemplates from './components/StrategyTemplates'
 import Watchlist from './components/Watchlist'
 import ParadigmEditor from './components/ParadigmEditor'
 import BrokerPanel from './components/BrokerPanel'
+import AuthPanel from './components/AuthPanel'
+import { useAuth } from './hooks/useAuth'
 import './App.css'
 
 const API_BASE = 'http://localhost:3001/api'
@@ -23,6 +25,7 @@ const MARKET_INDEXES = [
 ]
 
 function App() {
+  const { user, token, loading: authLoading, logout } = useAuth()
   const [marketData, setMarketData] = useState([])
   const [holdings, setHoldings] = useState([])
   const [alerts, setAlerts] = useState([])
@@ -1139,6 +1142,16 @@ function App() {
     navigate('/')
   }
 
+  // M6: 认证加载中
+  if (authLoading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f0f23', color: '#7c8cf8', fontSize: '1.2rem' }}>⚡ 智盈云加载中...</div>
+  }
+
+  // M6: 未登录时显示认证面板
+  if (!user) {
+    return <AuthPanel onSuccess={(u) => window.location.reload()} />
+  }
+
   return (
     <div className="app">
       {/* 顶部导航 */}
@@ -1159,6 +1172,17 @@ function App() {
           ))}
         </div>
         <div className="header-button-group">
+          {/* M6: 用户信息 + 登出按钮 */}
+          <span style={{ color: '#a0aec0', fontSize: '0.85rem', alignSelf: 'center', marginRight: 4 }}>
+            👤 {user.username}
+          </span>
+          <button
+            onClick={logout}
+            style={{ background: '#2d3748', border: '1px solid #4a5568', color: '#e2e8f0', borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem' }}
+            title="登出"
+          >
+            登出
+          </button>
           <button
             className="btn-hot-stock-analysis"
             onClick={goToCloudMap}

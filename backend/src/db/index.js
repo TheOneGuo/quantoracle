@@ -36,7 +36,7 @@ class Database {
     // 启用外键约束（SQLite 默认关闭）
     this.db.run('PRAGMA foreign_keys = ON');
 
-    // 用户主表（单用户模式，默认用户 'default-user'）
+    // 用户主表（支持多用户认证，默认用户 'default-user' 兼容现有数据）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -44,10 +44,13 @@ class Database {
         role TEXT DEFAULT 'investor',
         balance REAL DEFAULT 0,
         token_balance INTEGER DEFAULT 0,
+        password_hash TEXT,                -- 允许 NULL，兼容旧默认用户（bcrypt 哈希）
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // M6: 迁移现有 users 表，新增 password_hash 列（已有表不受影响）
+    this.db.run(`ALTER TABLE users ADD COLUMN password_hash TEXT`, () => {/* 忽略"列已存在"错误 */});
 
     // 插入默认用户（单用户模式）
     this.db.run(`INSERT OR IGNORE INTO users (id, username) VALUES ('default-user', 'admin')`);
@@ -85,21 +88,26 @@ class Database {
       )
     `);
 
-    // 持仓表
+    // 持仓表（M6: 新增 user_id 字段实现数据隔离）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS holdings (
-        code TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'default-user',
         name TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (code, user_id)
       )
     `);
+    // M6: 为旧 holdings 表迁移（添加 user_id 列）
+    this.db.run(`ALTER TABLE holdings ADD COLUMN user_id TEXT DEFAULT 'default-user'`, () => {});
 
-    // 交易记录表（支持买入和卖出）
+    // 交易记录表（M6: 新增 user_id 字段实现数据隔离）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         code TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'default-user',
         type TEXT DEFAULT 'buy',
         buy_price REAL,
         sell_price REAL,
@@ -110,6 +118,8 @@ class Database {
         FOREIGN KEY (code) REFERENCES holdings(code) ON DELETE CASCADE
       )
     `);
+    // M6: 为旧 trades 表迁移（添加 user_id 列）
+    this.db.run(`ALTER TABLE trades ADD COLUMN user_id TEXT DEFAULT 'default-user'`, () => {});
 
     // 预警记录表
     this.db.run(`
@@ -252,18 +262,30 @@ class Database {
    * 添加或更新持仓（UPSERT）
    * @param {string} code - 股票代码
    * @param {string} name - 股票名称
+   * @param {string} [userId='default-user'] - 用户ID（M6 多用户隔离）
    * @returns {Promise<{code: string, name: string}>}
    */
-  async addHolding(code, name) {
+  async addHolding(code, name, userId = 'default-user') {
     return new Promise((resolve, reject) => {
       this.db.run(
-        `INSERT INTO holdings (code, name, updated_at) 
-         VALUES (?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(code) DO UPDATE SET 
+        `INSERT INTO holdings (code, user_id, name, updated_at) 
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(code, user_id) DO UPDATE SET 
          name = excluded.name, updated_at = CURRENT_TIMESTAMP`,
-        [code, name],
+        [code, userId, name],
         function(err) {
-          if (err) reject(err);
+          if (err) {
+            // 兼容旧表结构（主键只有 code）
+            this.db ? this.db.run(
+              `INSERT INTO holdings (code, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(code) DO UPDATE SET name = excluded.name, updated_at = CURRENT_TIMESTAMP`,
+              [code, name],
+              function(err2) {
+                if (err2) reject(err2);
+                else resolve({ code, name });
+              }
+            ) : reject(err);
+          }
           else resolve({ code, name });
         }
       );
@@ -276,14 +298,15 @@ class Database {
    * @param {number} buyPrice - 买入价格
    * @param {number} quantity - 数量
    * @param {string} buyDate - 买入日期（YYYY-MM-DD）
+   * @param {string} [userId='default-user'] - 用户ID（M6 多用户隔离）
    * @returns {Promise<{id: number, code: string, buyPrice: number, quantity: number, buyDate: string, type: 'buy'}>}
    */
-  async addTrade(code, buyPrice, quantity, buyDate) {
+  async addTrade(code, buyPrice, quantity, buyDate, userId = 'default-user') {
     return new Promise((resolve, reject) => {
       this.db.run(
-        `INSERT INTO trades (code, type, buy_price, quantity, buy_date) 
-         VALUES (?, 'buy', ?, ?, ?)`,
-        [code, buyPrice, quantity, buyDate],
+        `INSERT INTO trades (code, user_id, type, buy_price, quantity, buy_date) 
+         VALUES (?, ?, 'buy', ?, ?, ?)`,
+        [code, userId, buyPrice, quantity, buyDate],
         function(err) {
           if (err) reject(err);
           else resolve({ id: this.lastID, code, buyPrice, quantity, buyDate, type: 'buy' });
@@ -298,14 +321,15 @@ class Database {
    * @param {number} sellPrice - 卖出价格
    * @param {number} quantity - 数量
    * @param {string} sellDate - 卖出日期（YYYY-MM-DD）
+   * @param {string} [userId='default-user'] - 用户ID（M6 多用户隔离）
    * @returns {Promise<{id: number, code: string, sellPrice: number, quantity: number, sellDate: string, type: 'sell'}>}
    */
-  async addSellTrade(code, sellPrice, quantity, sellDate) {
+  async addSellTrade(code, sellPrice, quantity, sellDate, userId = 'default-user') {
     return new Promise((resolve, reject) => {
       this.db.run(
-        `INSERT INTO trades (code, type, sell_price, quantity, sell_date) 
-         VALUES (?, 'sell', ?, ?, ?)`,
-        [code, sellPrice, quantity, sellDate],
+        `INSERT INTO trades (code, user_id, type, sell_price, quantity, sell_date) 
+         VALUES (?, ?, 'sell', ?, ?, ?)`,
+        [code, userId, sellPrice, quantity, sellDate],
         function(err) {
           if (err) reject(err);
           else resolve({ id: this.lastID, code, sellPrice, quantity, sellDate, type: 'sell' });
@@ -316,18 +340,20 @@ class Database {
 
   /**
    * 获取所有持仓（含交易明细，按更新时间降序）
+   * @param {string} [userId='default-user'] - 用户ID（M6 多用户隔离）
    * @returns {Promise<Array>} 持仓数组，每项含 trades 子数组
    */
-  async getHoldings() {
+  async getHoldings(userId = 'default-user') {
     return new Promise((resolve, reject) => {
       this.db.all(
         `SELECT h.*, 
           GROUP_CONCAT(t.id || ':' || t.type || ':' || COALESCE(t.buy_price, 'null') || ':' || COALESCE(t.sell_price, 'null') || ':' || t.quantity || ':' || COALESCE(t.buy_date, 'null') || ':' || COALESCE(t.sell_date, 'null'), ';') as trades
          FROM holdings h
-         LEFT JOIN trades t ON h.code = t.code
+         LEFT JOIN trades t ON h.code = t.code AND t.user_id = h.user_id
+         WHERE h.user_id = ?
          GROUP BY h.code
          ORDER BY h.updated_at DESC`,
-        [],
+        [userId],
         (err, rows) => {
           if (err) {
             reject(err);
@@ -365,11 +391,12 @@ class Database {
   /**
    * 删除持仓（级联删除关联交易记录）
    * @param {string} code - 股票代码
+   * @param {string} [userId='default-user'] - 用户ID（M6 多用户隔离）
    * @returns {Promise<{deleted: boolean}>}
    */
-  async deleteHolding(code) {
+  async deleteHolding(code, userId = 'default-user') {
     return new Promise((resolve, reject) => {
-      this.db.run('DELETE FROM holdings WHERE code = ?', [code], function(err) {
+      this.db.run('DELETE FROM holdings WHERE code = ? AND user_id = ?', [code, userId], function(err) {
         if (err) reject(err);
         else resolve({ deleted: this.changes > 0 });
       });

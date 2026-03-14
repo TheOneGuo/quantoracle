@@ -787,3 +787,12 @@ CREATE TABLE token_usage (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+## 十二、M6 用户认证系统（2026-03-14）
+
+### 实现内容
+- JWT 认证（7天有效期，bcrypt密码哈希）
+- 注册/登录/登出/用户信息 API
+- 前端登录界面（AuthPanel.jsx）
+- 渐进式路由保护（敏感路由强制认证）
+- 持仓/交易数据按用户隔离
