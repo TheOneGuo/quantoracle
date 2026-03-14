@@ -199,12 +199,17 @@ async function fetchFromBotAPI(channelId, limit = 20, updateOffset = 0) {
 // 3.2 RSS 备用方式
 // ─────────────────────────────────────────────────────────
 
-/** 公共 RSSHub 实例列表（按优先级排序） */
-const RSS_ENDPOINTS = [
-  (username) => `https://rsshub.app/telegram/channel/${username}`,
-  (username) => `https://rss.shab.fun/telegram/channel/${username}`,
-  (username) => `https://rsshub.rssforever.com/telegram/channel/${username}`,
-];
+/** 公共 RSSHub 实例列表（按优先级排序，支持 {channel} 占位符）
+ * 优先从环境变量 RSS_HUB_INSTANCES 读取（逗号分隔）
+ * fallback 到硬编码顺序：tg.i-c-a.su 排第一（Financial_Express 仅此可用）
+ */
+const RSS_INSTANCES = process.env.RSS_HUB_INSTANCES
+  ? process.env.RSS_HUB_INSTANCES.split(',')
+  : [
+      'https://tg.i-c-a.su/rss/{channel}',
+      'https://rsshub.rssforever.com/telegram/channel/{channel}',
+      'https://rsshub.app/telegram/channel/{channel}',
+    ];
 
 /**
  * 通过公共 RSSHub 抓取 Telegram 公开频道（无需 Bot Token）
@@ -218,8 +223,8 @@ async function fetchFromRSS(channelUsername) {
   const name = channelUsername.replace(/^@/, '');
   const errors = [];
 
-  for (const endpointFn of RSS_ENDPOINTS) {
-    const url = endpointFn(name);
+  for (const instance of RSS_INSTANCES) {
+    const url = instance.replace('{channel}', name);
     try {
       const xml = await httpGet(url, 10000);
       const items = parseRSS(xml);
