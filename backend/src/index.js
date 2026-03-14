@@ -899,11 +899,12 @@ app.post('/api/ai/screen', async (req, res) => {
 /**
  * 查询用户 token 余额
  * @route GET /api/usage/balance
+ * @middleware authOptional - 可选认证，兼容未登录用户
  * @returns {Object} 用户 token 余额信息
  */
-app.get('/api/usage/balance', async (req, res) => {
+app.get('/api/usage/balance', authOptional, async (req, res) => {
     try {
-        const userId = req.query.user_id || DEFAULT_USER_ID;
+        const userId = req.user?.id || req.query.user_id || DEFAULT_USER_ID;
         const balanceInfo = await db.getUserTokenBalance(userId);
         
         res.json({
@@ -927,13 +928,14 @@ app.get('/api/usage/balance', async (req, res) => {
 /**
  * 获取 token 使用历史记录
  * @route GET /api/usage/history
+ * @middleware authOptional - 可选认证，兼容未登录用户
  * @query {number} limit - 返回记录数（默认50）
  * @query {number} offset - 偏移量（默认0）
  * @returns {Object} token 使用历史记录
  */
-app.get('/api/usage/history', async (req, res) => {
+app.get('/api/usage/history', authOptional, async (req, res) => {
     try {
-        const userId = req.query.user_id || DEFAULT_USER_ID;
+        const userId = req.user?.id || req.query.user_id || DEFAULT_USER_ID;
         const limit = parseInt(req.query.limit) || 50;
         const offset = parseInt(req.query.offset) || 0;
         
@@ -961,12 +963,14 @@ app.get('/api/usage/history', async (req, res) => {
 /**
  * 内部扣减 token（AI调用时调用）
  * @route POST /api/usage/deduct
+ * @middleware authOptional - 可选认证，兼容未登录用户
  * @body {Object} usageData - 使用数据
  * @returns {Object} 扣减结果
  */
-app.post('/api/usage/deduct', async (req, res) => {
+app.post('/api/usage/deduct', authOptional, async (req, res) => {
     try {
-        const { user_id = DEFAULT_USER_ID, usage_data } = req.body;
+        const userId = req.user?.id || req.body.user_id || DEFAULT_USER_ID;
+        const { usage_data } = req.body;
         
         if (!usage_data) {
             return res.status(400).json({
@@ -995,11 +999,11 @@ app.post('/api/usage/deduct', async (req, res) => {
         }
         
         // 执行扣减
-        const result = await db.deductTokens(user_id, usage_data);
+        const result = await db.deductTokens(userId, usage_data);
         
         res.json({
             success: true,
-            user_id,
+            user_id: userId,
             usage_id: result.usage_id,
             new_balance: result.new_balance,
             tokens_deducted: result.tokens_deducted,
@@ -1026,12 +1030,13 @@ app.post('/api/usage/deduct', async (req, res) => {
 /**
  * 获取 token 使用统计
  * @route GET /api/usage/stats
+ * @middleware authOptional - 可选认证，兼容未登录用户
  * @query {number} days - 统计天数（默认30）
  * @returns {Object} token 使用统计数据
  */
-app.get('/api/usage/stats', async (req, res) => {
+app.get('/api/usage/stats', authOptional, async (req, res) => {
     try {
-        const userId = req.query.user_id || DEFAULT_USER_ID;
+        const userId = req.user?.id || req.query.user_id || DEFAULT_USER_ID;
         const days = parseInt(req.query.days) || 30;
         
         const stats = await db.getTokenUsageStats(userId, days);
@@ -1078,13 +1083,15 @@ app.get('/api/usage/stats', async (req, res) => {
 /**
  * 充值 token（测试/管理用）
  * @route POST /api/usage/add
+ * @middleware authOptional - 可选认证，兼容未登录用户
  * @body {number} tokens - 增加的 token 数量
  * @body {string} purchase_method - 购买方式（system/test/user）
  * @returns {Object} 充值结果
  */
-app.post('/api/usage/add', async (req, res) => {
+app.post('/api/usage/add', authOptional, async (req, res) => {
     try {
-        const { user_id = DEFAULT_USER_ID, tokens, purchase_method = 'system' } = req.body;
+        const userId = req.user?.id || req.body.user_id || DEFAULT_USER_ID;
+        const { tokens, purchase_method = 'system' } = req.body;
         
         if (!tokens || tokens <= 0) {
             return res.status(400).json({
@@ -1093,11 +1100,11 @@ app.post('/api/usage/add', async (req, res) => {
             });
         }
         
-        const result = await db.addTokens(user_id, tokens, purchase_method);
+        const result = await db.addTokens(userId, tokens, purchase_method);
         
         res.json({
             success: true,
-            user_id,
+            user_id: userId,
             new_balance: result.new_balance,
             tokens_added: result.tokens_added,
             purchase_method: result.purchase_method,
@@ -1108,6 +1115,65 @@ app.post('/api/usage/add', async (req, res) => {
         res.status(500).json({
             success: false,
             error: `充值 token 失败: ${error.message}`
+        });
+    }
+});
+
+/**
+ * 获取用户用量汇总（前端用量面板专用）
+ * @route GET /api/usage/summary
+ * @middleware authOptional - 可选认证，兼容未登录用户
+ * @returns {Object} 包含余额、今日/总消耗、Top功能、模型分布的汇总数据
+ */
+app.get('/api/usage/summary', authOptional, async (req, res) => {
+    try {
+        const userId = req.user?.id || req.query.user_id || DEFAULT_USER_ID;
+
+        // 并行获取余额和近30天统计
+        const [balanceInfo, statsAll, statsToday] = await Promise.all([
+            db.getUserTokenBalance(userId),
+            db.getTokenUsageStats(userId, 30),
+            db.getTokenUsageStats(userId, 1)
+        ]);
+
+        // 今日消耗
+        const today_consumed = statsToday.reduce((sum, s) => sum + (s.total_tokens || 0), 0);
+        // 总消耗（30天内）
+        const total_consumed = balanceInfo.consumed_total || 0;
+
+        // Top3 功能（按token消耗降序）
+        const featureMap = {};
+        statsAll.forEach(s => {
+            featureMap[s.function_name] = (featureMap[s.function_name] || 0) + (s.total_tokens || 0);
+        });
+        const top_features = Object.entries(featureMap)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([name, tokens]) => ({ name, tokens }));
+
+        // 模型分布
+        const modelMap = {};
+        statsAll.forEach(s => {
+            modelMap[s.model_id] = (modelMap[s.model_id] || 0) + (s.total_tokens || 0);
+        });
+        const model_breakdown = Object.entries(modelMap)
+            .sort((a, b) => b[1] - a[1])
+            .map(([model_id, tokens]) => ({ model_id, tokens }));
+
+        res.json({
+            success: true,
+            user_id: userId,
+            token_balance: balanceInfo.balance,
+            total_consumed,
+            today_consumed,
+            top_features,
+            model_breakdown
+        });
+    } catch (error) {
+        console.error('获取用量汇总失败:', error);
+        res.status(500).json({
+            success: false,
+            error: `获取用量汇总失败: ${error.message}`
         });
     }
 });

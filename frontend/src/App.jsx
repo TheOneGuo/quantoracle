@@ -13,6 +13,7 @@ import ParadigmEditor from './components/ParadigmEditor'
 import BrokerPanel from './components/BrokerPanel'
 import AuthPanel from './components/AuthPanel'
 import MarketplacePage from './components/MarketplacePage'
+import UsagePanel from './components/UsagePanel'
 import { useAuth } from './hooks/useAuth'
 import './App.css'
 
@@ -36,6 +37,7 @@ function App() {
   const [smartAnalysisLoading, setSmartAnalysisLoading] = useState(false)
   const [smartAnalysisUpdated, setSmartAnalysisUpdated] = useState(null)
   const [analyzeLoading, setAnalyzeLoading] = useState(false)
+  const [showUsagePanel, setShowUsagePanel] = useState(false)
   const [analyzeMessage, setAnalyzeMessage] = useState(null)
 
   const [stockCode, setStockCode] = useState('')
@@ -1178,9 +1180,16 @@ function App() {
         </div>
         <div className="header-button-group">
           {/* M6: 用户信息 + 登出按钮 */}
-          <span style={{ color: '#a0aec0', fontSize: '0.85rem', alignSelf: 'center', marginRight: 4 }}>
-            👤 {user.username}
-          </span>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={() => setShowUsagePanel(v => !v)}
+              style={{ background: '#2d3748', border: '1px solid #4a5568', color: '#a0aec0', borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem' }}
+              title="查看用量"
+            >
+              👤 {user.username} ⚡
+            </button>
+            {showUsagePanel && <UsagePanel onClose={() => setShowUsagePanel(false)} />}
+          </div>
           <button
             onClick={logout}
             style={{ background: '#2d3748', border: '1px solid #4a5568', color: '#e2e8f0', borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem' }}
