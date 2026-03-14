@@ -1,11 +1,45 @@
 #!/usr/bin/env node
 // 测试 StepFun step-3.5-flash:free 对新闻的分析速度和质量
-// 运行方式：OPENROUTER_API_KEY=xxx node scripts/test-stepfun-analysis.js
+// 运行方式：node scripts/test-stepfun-analysis.js
+// API Key 优先从后端数据库读取，fallback 到环境变量 OPENROUTER_API_KEY
 
 const https = require('https');
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = 'stepfun/step-3.5-flash:free';
+
+/**
+ * 通过后端内部接口获取平台API Key（localhost限定，无认证需求）
+ * @returns {Promise<string|null>}
+ */
+async function getApiKeyFromBackend() {
+  try {
+    const res = await fetch('http://localhost:3001/api/admin/providers/1/key?internal=1');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.api_key || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取API Key：优先从数据库读取，fallback到环境变量
+ * @returns {Promise<string>}
+ */
+async function getApiKey() {
+  const dbKey = await getApiKeyFromBackend();
+  if (dbKey) {
+    console.log('✅ 使用数据库平台Key');
+    return dbKey;
+  }
+  const envKey = process.env.OPENROUTER_API_KEY;
+  if (envKey) {
+    console.log('⚠️  数据库Key不可用，使用环境变量 OPENROUTER_API_KEY');
+    return envKey;
+  }
+  throw new Error('未找到API Key，请在AI引擎管理中心配置 OpenRouter，或设置环境变量 OPENROUTER_API_KEY');
+}
+
 
 const TEST_NEWS = [
   {
@@ -50,7 +84,7 @@ const PROMPT_TEMPLATE = `请分析以下金融新闻，以JSON格式返回：
 新闻标题：{title}
 新闻内容：{content}`;
 
-function callOpenRouter(prompt) {
+function callOpenRouter(prompt, apiKey) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: MODEL,
@@ -65,7 +99,7 @@ function callOpenRouter(prompt) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'HTTP-Referer': 'https://github.com/TheOneGuo/quantoracle',
         'X-Title': 'QuantOracle',
         'Content-Length': Buffer.byteLength(body),
@@ -123,7 +157,7 @@ function callOpenRouter(prompt) {
   });
 }
 
-async function analyzeNews(news, index) {
+async function analyzeNews(news, index, apiKey) {
   const prompt = PROMPT_TEMPLATE
     .replace('{title}', news.title)
     .replace('{content}', news.content);
@@ -132,7 +166,7 @@ async function analyzeNews(news, index) {
   console.log(`  类别: ${news.category}`);
 
   try {
-    const result = await callOpenRouter(prompt);
+    const result = await callOpenRouter(prompt, apiKey);
     
     console.log(`  首Token延迟: ${result.firstTokenMs}ms`);
     console.log(`  总响应时间: ${result.totalMs}ms`);
@@ -168,21 +202,23 @@ async function main() {
   console.log(`模型: ${MODEL}`);
   console.log(`测试时间: ${new Date().toLocaleString('zh-CN')}`);
 
-  if (!OPENROUTER_API_KEY) {
-    console.log('\n❌ 错误: OPENROUTER_API_KEY 环境变量未设置');
-    console.log('运行方式: OPENROUTER_API_KEY=your_key node scripts/test-stepfun-analysis.js');
+  let apiKey;
+  try {
+    apiKey = await getApiKey();
+  } catch (e) {
+    console.log(`\n❌ 错误: ${e.message}`);
     console.log('\n📋 测试脚本已就绪，等待API Key配置后可运行');
     console.log('\n模拟基准数据（仅供参考）:');
     console.log('  预估首Token延迟: 800-1500ms（free tier）');
     console.log('  预估总响应时间: 2000-4000ms（free tier）');
     console.log('  预估输出tokens: 80-120 tokens/次');
-    console.log('\n💡 建议: 配置OPENROUTER_API_KEY后运行真实基准测试');
+    console.log('\n💡 建议: 在AI引擎管理中心配置OpenRouter Key后运行真实基准测试');
     process.exit(0);
   }
 
   const results = [];
   for (let i = 0; i < TEST_NEWS.length; i++) {
-    const r = await analyzeNews(TEST_NEWS[i], i);
+    const r = await analyzeNews(TEST_NEWS[i], i, apiKey);
     results.push(r);
     // Rate limit buffer
     if (i < TEST_NEWS.length - 1) await new Promise(r => setTimeout(r, 1000));

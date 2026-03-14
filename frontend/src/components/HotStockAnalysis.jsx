@@ -237,6 +237,13 @@ function HotStockAnalysis({ onBack, holdings, onAddToHoldings }) {
               更新于 {lastUpdated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+          <a
+            href="/ai-settings"
+            style={{ fontSize: '0.75rem', color: '#1890ff', marginLeft: 10, textDecoration: 'none' }}
+            title="AI引擎设置"
+          >
+            ⚙️ AI引擎设置
+          </a>
         </div>
         <div className="header-right">
           <button 

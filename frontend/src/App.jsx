@@ -15,6 +15,7 @@ import AuthPanel from './components/AuthPanel'
 import MarketplacePage from './components/MarketplacePage'
 import UsagePanel from './components/UsagePanel'
 import NewsFlash from './components/NewsFlash'
+import AIProviderManager from './components/AIProviderManager'
 import { useAuth } from './hooks/useAuth'
 import './App.css'
 
@@ -1190,6 +1191,13 @@ function App() {
               👤 {user.username} ⚡
             </button>
             {showUsagePanel && <UsagePanel onClose={() => setShowUsagePanel(false)} />}
+            <button
+              onClick={() => navigate('/ai-settings')}
+              style={{ background: '#2d3748', border: '1px solid #4a5568', color: '#a0aec0', borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem' }}
+              title="AI引擎设置"
+            >
+              ⚙️ AI引擎
+            </button>
           </div>
           <button
             onClick={logout}
@@ -1288,6 +1296,7 @@ function App() {
         <Route path="/paradigms" element={<ParadigmEditor />} />
         <Route path="/broker" element={<BrokerPanel />} />
         <Route path="/marketplace" element={<MarketplacePage user={user} />} />
+        <Route path="/ai-settings" element={<AIProviderManager />} />
         <Route path="/news" element={
           <div style={{ padding: '16px', maxWidth: '900px', margin: '0 auto' }}>
             <NewsFlash />

@@ -179,6 +179,63 @@ class Database {
     `);
 
     // =====================
+    // AI 提供商管理表
+    // =====================
+
+    /** AI提供商配置表（平台级，安全存储API Key） */
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ai_providers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        provider_type TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        api_key TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        is_default BOOLEAN DEFAULT FALSE,
+        models TEXT DEFAULT '[]',
+        extra_config TEXT DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    /** 预置模型配置表 */
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ai_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id INTEGER REFERENCES ai_providers(id),
+        model_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        tier TEXT DEFAULT 'standard',
+        token_cost_per_1k REAL DEFAULT 0,
+        context_length INTEGER DEFAULT 8192,
+        is_enabled BOOLEAN DEFAULT TRUE,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 插入默认提供商（仅当表为空时）
+    this.db.get('SELECT COUNT(*) as cnt FROM ai_providers', (err, row) => {
+      if (!err && row && row.cnt === 0) {
+        this.db.run(`
+          INSERT INTO ai_providers (id, name, provider_type, base_url, is_default, models)
+          VALUES
+            (1, 'OpenRouter', 'openrouter', 'https://openrouter.ai/api/v1', TRUE, '[]'),
+            (2, 'Ollama本地', 'ollama', 'http://localhost:11434/v1', FALSE, '[]')
+        `);
+        // 插入默认模型
+        this.db.run(`
+          INSERT INTO ai_models (provider_id, model_id, display_name, tier, token_cost_per_1k, context_length, description)
+          VALUES
+            (1, 'stepfun/step-3.5-flash:free', 'StepFun Flash', 'free', 0, 8192, '快速响应，适合日常分析'),
+            (1, 'deepseek/deepseek-v3.2', 'DeepSeek V3', 'standard', 0.015, 65536, '平衡性能与成本，推荐使用'),
+            (1, 'anthropic/claude-sonnet-4-5', 'Claude Sonnet', 'premium', 0.06, 200000, '高质量分析，适合复杂推理')
+        `);
+      }
+    });
+
+    // =====================
     // 策略广场核心表
     // =====================
 

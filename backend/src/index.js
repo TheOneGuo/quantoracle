@@ -658,13 +658,15 @@ server.listen(PORT, () => {
   console.log(`WebSocket: ws://localhost:${PORT}/ws`);
 });
 
-// DeepSeek AI API 代理
+// DeepSeek AI API 代理（优先使用数据库平台Key）
 app.post('/api/ai/deepseek', async (req, res) => {
   try {
-    const { messages, apiKey } = req.body;
-    
+    const { messages, apiKey: userApiKey } = req.body;
+    // 优先级：数据库平台Key > 请求体中的apiKey > 报错
+    const platformKey = await getPlatformKey('openrouter');
+    const apiKey = platformKey || userApiKey;
     if (!apiKey) {
-      return res.status(400).json({ error: 'Missing API key' });
+      return res.status(400).json({ error: '未配置API Key，请前往AI引擎设置配置' });
     }
 
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -694,13 +696,14 @@ app.post('/api/ai/deepseek', async (req, res) => {
   }
 });
 
-// Kimi AI API 代理
+// Kimi AI API 代理（优先使用数据库平台Key）
 app.post('/api/ai/kimi', async (req, res) => {
   try {
-    const { messages, apiKey } = req.body;
-    
+    const { messages, apiKey: userApiKey } = req.body;
+    const platformKey = await getPlatformKey('openrouter');
+    const apiKey = platformKey || userApiKey;
     if (!apiKey) {
-      return res.status(400).json({ error: 'Missing API key' });
+      return res.status(400).json({ error: '未配置API Key，请前往AI引擎设置配置' });
     }
 
     const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
@@ -730,13 +733,14 @@ app.post('/api/ai/kimi', async (req, res) => {
   }
 });
 
-// 豆包 AI API 代理
+// 豆包 AI API 代理（优先使用数据库平台Key）
 app.post('/api/ai/doubao', async (req, res) => {
   try {
-    const { messages, apiKey } = req.body;
-    
+    const { messages, apiKey: userApiKey } = req.body;
+    const platformKey = await getPlatformKey('openrouter');
+    const apiKey = platformKey || userApiKey;
     if (!apiKey) {
-      return res.status(400).json({ error: 'Missing API key' });
+      return res.status(400).json({ error: '未配置API Key，请前往AI引擎设置配置' });
     }
 
     const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
@@ -1363,6 +1367,176 @@ cron.schedule('0 * * * *', async () => {
   }
 });
 
+const { AIProviderService, maskApiKey } = require('./services/ai-provider-service');
+
+/** @type {AIProviderService} */
+let aiProviderService;
+
+// 延迟初始化（db需要先完成init）
+setTimeout(() => {
+  aiProviderService = new AIProviderService(db.db);
+}, 500);
+
+// =============================================
+// Admin - AI 提供商管理路由
+// =============================================
+
+/**
+ * 获取所有AI提供商列表（API Key脱敏）
+ * @route GET /api/admin/providers
+ */
+app.get('/api/admin/providers', authRequired, async (req, res) => {
+  try {
+    const providers = await aiProviderService.getAllProviders();
+    res.json({ success: true, providers });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 添加新AI提供商
+ * @route POST /api/admin/providers
+ */
+app.post('/api/admin/providers', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.addProvider(req.body);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 更新AI提供商配置（含Key、URL、模型）
+ * @route PUT /api/admin/providers/:id
+ */
+app.put('/api/admin/providers/:id', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.updateProvider(Number(req.params.id), req.body);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 删除AI提供商
+ * @route DELETE /api/admin/providers/:id
+ */
+app.delete('/api/admin/providers/:id', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.deleteProvider(Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 测试AI提供商连通性
+ * @route POST /api/admin/providers/:id/test
+ */
+app.post('/api/admin/providers/:id/test', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.testConnection(Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 设置默认AI提供商
+ * @route POST /api/admin/providers/:id/default
+ */
+app.post('/api/admin/providers/:id/default', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.setDefault(Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 拉取提供商的可用模型列表
+ * @route GET /api/admin/providers/:id/models
+ */
+app.get('/api/admin/providers/:id/models', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.fetchProviderModels(Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 内部接口：获取提供商明文Key（仅localhost可调用）
+ * @route GET /api/admin/providers/:id/key
+ * @query {string} internal=1
+ */
+app.get('/api/admin/providers/:id/key', async (req, res) => {
+  const ip = req.socket.remoteAddress || req.ip;
+  const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  if (!isLocal || req.query.internal !== '1') {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+  try {
+    const provider = await aiProviderService.getProviderRaw(Number(req.params.id));
+    if (!provider) return res.status(404).json({ success: false, error: '提供商不存在' });
+    res.json({ success: true, api_key: provider.api_key, provider_type: provider.provider_type });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 添加模型到提供商
+ * @route POST /api/admin/models
+ */
+app.post('/api/admin/models', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.addModel(req.body);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 删除模型配置
+ * @route DELETE /api/admin/models/:id
+ */
+app.delete('/api/admin/models/:id', authRequired, async (req, res) => {
+  try {
+    const result = await aiProviderService.deleteModel(Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// =============================================
+// 从数据库获取平台Key的辅助函数
+// =============================================
+
+/**
+ * 获取指定类型提供商的平台Key
+ * @param {string} providerType - 'openrouter'|'ollama'|'custom'
+ * @returns {Promise<string|null>}
+ */
+async function getPlatformKey(providerType) {
+  if (!aiProviderService) return null;
+  try {
+    return await aiProviderService.getPlatformKey(providerType);
+  } catch {
+    return null;
+  }
+}
+
+// =============================================
 // 大盘云图代理（去除广告和不需要的内容）
 app.get('/api/cloudmap-proxy', async (req, res) => {
   try {

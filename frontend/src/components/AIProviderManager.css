@@ -1,0 +1,307 @@
+/* AIProviderManager.css - AI引擎管理中心样式 */
+
+.ai-provider-manager {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── 顶部 header ── */
+.manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.manager-header h2 {
+  margin: 4px 0;
+  font-size: 1.5rem;
+  color: #1a1a2e;
+}
+.manager-desc {
+  color: #666;
+  font-size: 0.85rem;
+  margin: 4px 0 0;
+}
+.btn-back {
+  background: none;
+  border: none;
+  color: #1890ff;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+/* ── 通用按钮 ── */
+.btn {
+  padding: 6px 14px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn:hover { border-color: #1890ff; color: #1890ff; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #1890ff; color: #fff; border-color: #1890ff; }
+.btn-primary:hover { background: #096dd9; border-color: #096dd9; color: #fff; }
+.btn-sm { padding: 3px 10px; font-size: 0.8rem; }
+.btn-xs { padding: 1px 6px; font-size: 0.72rem; }
+.btn-test { border-color: #52c41a; color: #52c41a; }
+.btn-test:hover { background: #52c41a; color: #fff; }
+.btn-edit { border-color: #faad14; color: #faad14; }
+.btn-edit:hover { background: #faad14; color: #fff; }
+.btn-delete { border-color: #ff4d4f; color: #ff4d4f; }
+.btn-delete:hover { background: #ff4d4f; color: #fff; }
+.btn-add { border-color: #1890ff; color: #1890ff; }
+.btn-add:hover { background: #1890ff; color: #fff; }
+.btn-link {
+  background: none; border: none; color: #1890ff;
+  cursor: pointer; font-size: 0.8rem; margin-left: 8px; text-decoration: underline;
+}
+
+/* ── 提供商列表 ── */
+.provider-list { display: flex; flex-direction: column; gap: 12px; }
+
+.provider-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+  transition: box-shadow 0.2s;
+}
+.provider-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+.provider-default { border-color: #1890ff; background: #f0f8ff; }
+
+.provider-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-info { display: flex; align-items: center; gap: 12px; }
+.provider-icon { font-size: 1.8rem; }
+.provider-name { font-weight: 600; font-size: 1rem; display: flex; align-items: center; gap: 6px; }
+.provider-meta { font-size: 0.8rem; color: #666; margin-top: 2px; }
+.provider-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: normal;
+}
+.badge-default { background: #1890ff; color: #fff; }
+.badge-inactive { background: #f0f0f0; color: #999; }
+
+.status-dot { margin-left: 10px; font-size: 0.8rem; }
+.status-dot.ok { color: #52c41a; }
+.status-dot.fail { color: #ff4d4f; }
+
+/* ── 编辑面板 ── */
+.provider-edit-panel {
+  margin-top: 16px;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 16px;
+}
+.provider-edit-panel h4 { margin: 0 0 10px; font-size: 0.95rem; }
+
+.model-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.model-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.model-tier { font-weight: 600; min-width: 32px; }
+.model-id { font-family: monospace; color: #333; flex: 1; }
+.model-name { color: #666; }
+.model-desc { color: #999; font-size: 0.75rem; }
+
+.model-add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.input-sm {
+  flex: 1;
+  min-width: 140px;
+  padding: 4px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.input-full {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+.input-full:focus, .input-sm:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24,144,255,0.1);
+}
+
+.empty-state { text-align: center; padding: 60px 0; color: #999; }
+.empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+.empty-hint { color: #bbb; font-size: 0.82rem; padding: 8px 0; }
+.loading-hint { color: #bbb; font-size: 0.85rem; padding: 8px 0; }
+
+/* ── 向导弹窗 ── */
+.wizard-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.wizard-modal {
+  background: #fff;
+  border-radius: 14px;
+  padding: 32px;
+  width: 100%;
+  max-width: 560px;
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.wizard-close {
+  position: absolute; top: 14px; right: 16px;
+  background: none; border: none; font-size: 1.2rem;
+  cursor: pointer; color: #999;
+}
+.wizard-close:hover { color: #333; }
+
+/* ── 步骤指示器 ── */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 28px;
+  gap: 0;
+}
+.step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex: 1;
+}
+.step-circle {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid #d9d9d9;
+  background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; font-weight: 600;
+  color: #999;
+  position: relative; z-index: 1;
+}
+.step-item.active .step-circle { border-color: #1890ff; color: #1890ff; }
+.step-item.done .step-circle { border-color: #52c41a; background: #52c41a; color: #fff; }
+.step-label { font-size: 0.72rem; color: #999; margin-top: 4px; text-align: center; }
+.step-item.active .step-label { color: #1890ff; }
+.step-item.done .step-label { color: #52c41a; }
+.step-line {
+  position: absolute;
+  top: 14px; left: 50%; right: -50%;
+  height: 2px;
+  background: #e8e8e8;
+  z-index: 0;
+}
+.step-item.done .step-line { background: #52c41a; }
+
+/* ── 向导内容 ── */
+.wizard-step h3 { margin: 0 0 16px; font-size: 1.1rem; }
+
+/* 类型选择网格 */
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+.type-card {
+  border: 2px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 20px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.type-card:hover { border-color: #1890ff; background: #f0f8ff; transform: translateY(-2px); }
+.type-icon { font-size: 2rem; margin-bottom: 8px; }
+.type-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; }
+.type-desc { font-size: 0.8rem; color: #666; }
+.type-hint { font-size: 0.75rem; color: #1890ff; margin-top: 4px; }
+
+/* 配置表单 */
+.step-config { display: flex; flex-direction: column; gap: 16px; }
+.form-row { display: flex; flex-direction: column; gap: 6px; }
+.form-row label { font-size: 0.88rem; font-weight: 500; color: #333; display: flex; align-items: center; }
+.hint-box {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #664e00;
+}
+.howto-box {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #135200;
+  line-height: 1.8;
+  margin-top: 4px;
+}
+
+/* 测试结果 */
+.step-test { display: flex; flex-direction: column; gap: 16px; }
+.test-loading { color: #666; font-size: 0.95rem; }
+.test-result {
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+.test-result.success { background: #f6ffed; border: 1px solid #b7eb8f; color: #135200; }
+.test-result.fail { background: #fff2f0; border: 1px solid #ffccc7; color: #a8071a; }
+
+/* 向导操作按钮 */
+.wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.done-actions { justify-content: center; flex-wrap: wrap; }
+
+/* 完成页面 */
+.wizard-done { text-align: center; }
+.done-icon { font-size: 4rem; margin-bottom: 12px; }
+.wizard-done h3 { font-size: 1.4rem; margin-bottom: 8px; }
+.wizard-done p { color: #666; margin: 4px 0; }
+.success-hint { color: #52c41a !important; }
+
+/* ── 响应式适配 ── */
+@media (max-width: 600px) {
+  .ai-provider-manager { padding: 12px; }
+  .type-grid { grid-template-columns: repeat(2, 1fr); }
+  .manager-header { flex-direction: column; }
+  .wizard-modal { padding: 20px 16px; }
+  .provider-card-header { flex-direction: column; align-items: flex-start; }
+  .provider-actions { width: 100%; }
+}
