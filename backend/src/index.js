@@ -650,6 +650,8 @@ wss.on('connection', (ws, req) => {
 
 // 将 broadcast 挂在 app 上，供其他模块使用
 app.broadcast = broadcast;
+// 挂到 global，让 news-paradigm-analyzer 等服务层也能推送
+global.wsBroadcast = broadcast;
 
 server.listen(PORT, () => {
   console.log(`Stock Platform API running on port ${PORT}`);
@@ -2029,6 +2031,138 @@ app.get('/api/news/stock/:code', async (req, res) => {
   const code = req.params.code;
   const count = req.query.count || 20;
   await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
+});
+
+// ────────────────────────────────────────────────────────────────
+// 新闻分析路由（评分引擎 + 范式分析结果）
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * 已分析新闻列表（score >= 7，含范式分析结果）
+ * @route GET /api/news/analyzed
+ */
+app.get('/api/news/analyzed', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+    const offset = parseInt(req.query.offset || '0', 10);
+    const rows = await new Promise((resolve, reject) => {
+      db.db.all(
+        `SELECT np.*, na.id as analysis_id, na.analysis, na.confidence, na.action, na.time_window,
+                na.stock_recommendations, na.model_used, na.paradigm_ids
+         FROM news_processed np
+         LEFT JOIN news_analysis na ON np.id = na.news_id
+         WHERE np.score >= 7
+         ORDER BY np.score DESC, np.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [limit, offset],
+        (err, r) => { if (err) reject(err); else resolve(r || []); }
+      );
+    });
+    const parsed = rows.map(r => ({
+      ...r,
+      analysis: r.analysis ? (() => { try { return JSON.parse(r.analysis); } catch { return r.analysis; } })() : null,
+      stock_recommendations: r.stock_recommendations ? (() => { try { return JSON.parse(r.stock_recommendations); } catch { return []; } })() : [],
+    }));
+    res.json({ success: true, count: parsed.length, data: parsed });
+  } catch (e) {
+    console.error('[/api/news/analyzed]', e.message);
+    res.json({ success: true, count: 0, data: [], error: e.message });
+  }
+});
+
+/**
+ * 单条分析详情
+ * @route GET /api/news/analysis/:id
+ */
+app.get('/api/news/analysis/:id', async (req, res) => {
+  try {
+    const row = await new Promise((resolve, reject) => {
+      db.db.get(
+        `SELECT na.*, np.content, np.title, np.score, np.sentiment, np.urgency, np.published_at, np.source_key
+         FROM news_analysis na
+         JOIN news_processed np ON na.news_id = np.id
+         WHERE na.id = ?`,
+        [req.params.id],
+        (err, r) => { if (err) reject(err); else resolve(r); }
+      );
+    });
+    if (!row) return res.status(404).json({ success: false, error: '分析记录不存在' });
+    row.analysis = row.analysis ? (() => { try { return JSON.parse(row.analysis); } catch { return row.analysis; } })() : null;
+    row.stock_recommendations = row.stock_recommendations ? (() => { try { return JSON.parse(row.stock_recommendations); } catch { return []; } })() : [];
+    res.json({ success: true, data: row });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 今日新闻统计
+ * @route GET /api/news/stats
+ */
+app.get('/api/news/stats', async (req, res) => {
+  try {
+    const [total, scored, byScore, bySentiment, byStatus] = await Promise.all([
+      new Promise((resolve, reject) => {
+        db.db.get(`SELECT COUNT(*) as cnt FROM news_processed WHERE date(created_at) = date('now')`, [], (err, r) => { if (err) reject(err); else resolve(r?.cnt || 0); });
+      }),
+      new Promise((resolve, reject) => {
+        db.db.get(`SELECT COUNT(*) as cnt FROM news_processed WHERE score IS NOT NULL AND date(created_at) = date('now')`, [], (err, r) => { if (err) reject(err); else resolve(r?.cnt || 0); });
+      }),
+      new Promise((resolve, reject) => {
+        db.db.all(
+          `SELECT
+            SUM(CASE WHEN score >= 9 THEN 1 ELSE 0 END) as s9,
+            SUM(CASE WHEN score >= 7 AND score < 9 THEN 1 ELSE 0 END) as s7,
+            SUM(CASE WHEN score >= 5 AND score < 7 THEN 1 ELSE 0 END) as s5,
+            SUM(CASE WHEN score >= 3 AND score < 5 THEN 1 ELSE 0 END) as s3,
+            SUM(CASE WHEN score < 3 THEN 1 ELSE 0 END) as s0
+           FROM news_processed WHERE score IS NOT NULL AND date(created_at) = date('now')`,
+          [],
+          (err, r) => { if (err) reject(err); else resolve(r?.[0] || {}); }
+        );
+      }),
+      new Promise((resolve, reject) => {
+        db.db.all(`SELECT sentiment, COUNT(*) as cnt FROM news_processed WHERE date(created_at) = date('now') GROUP BY sentiment`, [], (err, r) => { if (err) reject(err); else resolve(r || []); });
+      }),
+      new Promise((resolve, reject) => {
+        db.db.all(`SELECT status, COUNT(*) as cnt FROM news_processed WHERE date(created_at) = date('now') GROUP BY status`, [], (err, r) => { if (err) reject(err); else resolve(r || []); });
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        today_total: total,
+        today_scored: scored,
+        score_distribution: {
+          critical: byScore.s9 || 0,    // 9-10
+          important: byScore.s7 || 0,   // 7-8
+          normal: byScore.s5 || 0,      // 5-6
+          minor: byScore.s3 || 0,       // 3-4
+          noise: byScore.s0 || 0,       // 0-2
+        },
+        sentiment: bySentiment,
+        status: byStatus,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// 新闻评分定时调度（每1分钟）
+// ────────────────────────────────────────────────────────────────
+cron.schedule('* * * * *', async () => {
+  try {
+    const scorer = require('./services/news-scorer');
+    const result = await scorer.scorePendingNews();
+    if (result.processed > 0) {
+      console.log(`[NewsScorer] 处理 ${result.processed} 条，高分 ${result.highScore} 条`);
+    }
+  } catch (e) {
+    console.error('[NewsScorer] 调度器异常:', e.message);
+  }
 });
 
 // ────────────────────────────────────────────────────────────────
