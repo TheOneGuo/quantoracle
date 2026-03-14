@@ -2031,9 +2031,110 @@ app.get('/api/news/stock/:code', async (req, res) => {
   await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
 });
 
+// ────────────────────────────────────────────────────────────────
+// Telegram新闻管道路由
+// ────────────────────────────────────────────────────────────────
+const NewsPoller = require('./services/news-poller');
+const { loadNewsSources } = require('./config/news-sources-loader');
+
+const newsPoller = new NewsPoller(db);
+
+// 启动定时轮询（仅在配置了 TG_BOT_TOKEN 或 NEWS_SRC_001 时）
+if (process.env.TG_BOT_TOKEN || process.env.NEWS_SRC_001) {
+  newsPoller.start();
+}
+
+/**
+ * 已处理新闻流（分页，按评分降序，无评分的按时间降序）
+ * @route GET /api/news/feed
+ * @query {number} page - 页码（默认1）
+ * @query {number} limit - 每页条数（默认20，最大50）
+ * @query {number} minScore - 最低评分过滤
+ */
+app.get('/api/news/feed', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit || '20')));
+    const minScore = parseFloat(req.query.minScore || '0');
+    const offset = (page - 1) * limit;
+
+    const rawDb = db.db;
+    const rows = await new Promise((resolve, reject) => {
+      rawDb.all(
+        `SELECT np.*, nr.views
+         FROM news_processed np
+         LEFT JOIN news_raw nr ON np.raw_id = nr.id
+         WHERE np.status != 'dismissed'
+           AND (np.score IS NULL OR np.score >= ?)
+         ORDER BY np.score DESC NULLS LAST, np.published_at DESC
+         LIMIT ? OFFSET ?`,
+        [minScore, limit, offset],
+        (err, rows) => err ? reject(err) : resolve(rows)
+      );
+    });
+
+    const total = await new Promise((resolve, reject) => {
+      rawDb.get(
+        `SELECT COUNT(*) as cnt FROM news_processed WHERE status != 'dismissed'`,
+        (err, row) => err ? reject(err) : resolve(row.cnt)
+      );
+    });
+
+    res.json({
+      success: true,
+      data: rows.map(r => ({ ...r, stock_codes: JSON.parse(r.stock_codes || '[]') })),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 待评分新闻数量
+ * @route GET /api/news/pending-score
+ */
+app.get('/api/news/pending-score', async (req, res) => {
+  try {
+    const rawDb = db.db;
+    const row = await new Promise((resolve, reject) => {
+      rawDb.get(
+        `SELECT COUNT(*) as cnt FROM news_processed WHERE status = 'pending'`,
+        (err, r) => err ? reject(err) : resolve(r)
+      );
+    });
+    res.json({ success: true, pending: row.cnt });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 手动触发一次抓取（需认证）
+ * @route POST /api/news/poll
+ */
+app.post('/api/news/poll', authRequired, async (req, res) => {
+  try {
+    const result = await newsPoller.pollAll();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * 查看来源列表（返回别名，不返回真实ID，需认证）
+ * @route GET /api/news/sources
+ */
+app.get('/api/news/sources', authRequired, (req, res) => {
+  const sources = loadNewsSources().map(({ key, alias, weight }) => ({ key, alias, weight }));
+  res.json({ success: true, count: sources.length, data: sources });
+});
+
 // 优雅关闭
 process.on('SIGINT', () => {
   console.log('\nClosing database connection...');
+  newsPoller.stop();
   db.close();
   process.exit(0);
 });

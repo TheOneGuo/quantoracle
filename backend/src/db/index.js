@@ -315,6 +315,76 @@ class Database {
         FOREIGN KEY (user_id) REFERENCES users(id)
       )
     `);
+
+    // =====================
+    // 新闻管道表（Telegram抓取）
+    // =====================
+
+    // 原始新闻表（存所有抓取到的消息，含重复）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS news_raw (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_key TEXT NOT NULL,         -- 来源别名，不存真实频道
+        raw_id TEXT,                       -- Telegram消息ID或RSS guid
+        content TEXT NOT NULL,
+        url TEXT,
+        published_at DATETIME,
+        views INTEGER DEFAULT 0,
+        source_weight INTEGER DEFAULT 3,
+        dedup_hash TEXT,
+        is_duplicate BOOLEAN DEFAULT FALSE,
+        duplicate_of INTEGER,             -- 指向 news_processed.id
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 处理后新闻表（去重后，等待评分）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS news_processed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_id INTEGER REFERENCES news_raw(id),
+        content TEXT NOT NULL,
+        url TEXT,
+        published_at DATETIME,
+        source_key TEXT NOT NULL,
+        source_weight INTEGER DEFAULT 3,
+        asset_type TEXT,                  -- A股/港股/美股/数字货币/大宗/宏观
+        event_type TEXT,                  -- 财报/政策/人事/并购/市场数据/突发
+        stock_codes TEXT DEFAULT '[]',    -- JSON数组，涉及的股票代码
+        score REAL,                        -- 评分 0-10
+        score_reason TEXT,                -- 评分理由（50字以内）
+        status TEXT DEFAULT 'pending',    -- pending/scored/analyzed/dismissed
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_raw_hash ON news_raw(dedup_hash)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_raw_source ON news_raw(source_key, created_at)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_processed_score ON news_processed(score DESC)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_processed_status ON news_processed(status)`);
+
+    // 迁移 news_processed：新增评分附属字段（已有表忽略错误）
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN sentiment TEXT`, () => {});
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN urgency TEXT`, () => {});
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN scored_at DATETIME`, () => {});
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN title TEXT`, () => {});
+
+    // 新闻范式分析结果表
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS news_analysis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        news_id INTEGER NOT NULL REFERENCES news_processed(id),
+        paradigm_ids TEXT DEFAULT '[]',          -- 触发的范式ID列表（JSON）
+        analysis TEXT NOT NULL,                  -- LLM分析结果（JSON字符串）
+        model_used TEXT,                         -- 使用的模型
+        confidence REAL,                         -- 置信度 0-1
+        stock_recommendations TEXT DEFAULT '[]', -- 推荐标的JSON
+        action TEXT,                             -- buy/watch/avoid
+        time_window TEXT,                        -- immediate/1-3days/1-2weeks
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_analysis_news_id ON news_analysis(news_id)`);
   }
 
   /**
