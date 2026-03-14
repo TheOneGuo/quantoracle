@@ -1,0 +1,417 @@
+/* ========== BrokerPanel 实盘对接面板样式 ========== */
+
+.broker-panel {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0e1a 0%, #0f172a 100%);
+  color: #f7fafc;
+  padding: 16px;
+  padding-bottom: 72px; /* 为移动端 TabBar 留空间 */
+}
+
+/* 顶部 */
+.broker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.broker-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.broker-title h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ws-badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.ws-badge.online {
+  background: rgba(72, 187, 120, 0.15);
+  color: #48bb78;
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.ws-badge.offline {
+  background: rgba(245, 101, 101, 0.15);
+  color: #f56565;
+  border: 1px solid rgba(245, 101, 101, 0.3);
+}
+
+.signal-badge {
+  background: rgba(237, 137, 54, 0.2);
+  color: #ed8936;
+  border: 1px solid rgba(237, 137, 54, 0.3);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.btn-refresh {
+  padding: 7px 16px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #667eea;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.btn-refresh:hover {
+  background: rgba(102, 126, 234, 0.3);
+}
+
+/* 账户概览卡片 */
+.account-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.acc-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acc-card label {
+  font-size: 11px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.acc-card span {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f7fafc;
+}
+
+/* Tab */
+.broker-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.tab-btn.active {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+}
+
+/* 表格 */
+.broker-content {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  min-height: 200px;
+  overflow: hidden;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.broker-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.broker-table th {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.broker-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+}
+
+.broker-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stock-code { color: #667eea; font-weight: 600; }
+
+.action-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.action-tag.buy { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
+.action-tag.sell { background: rgba(245, 101, 101, 0.2); color: #f56565; }
+
+.status-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.status-tag.filled { background: rgba(72, 187, 120, 0.15); color: #48bb78; }
+.status-tag.pending { background: rgba(237, 137, 54, 0.15); color: #ed8936; }
+.status-tag.cancelled { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
+.status-tag.failed { background: rgba(245, 101, 101, 0.15); color: #f56565; }
+
+.time-cell { color: #64748b; font-size: 12px; white-space: nowrap; }
+.order-id { font-family: monospace; font-size: 11px; color: #94a3b8; }
+
+/* 下单表单 */
+.trade-section {
+  padding: 16px;
+}
+
+.trade-card {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.trade-card h3 {
+  font-size: 16px;
+  margin-bottom: 16px;
+  color: #cbd5e0;
+}
+
+.trade-form-broker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-row label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.form-row input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #f7fafc;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-row input:focus {
+  border-color: rgba(102, 126, 234, 0.5);
+}
+
+.action-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.04);
+  color: #64748b;
+}
+
+.action-btn.buy.active {
+  background: rgba(72, 187, 120, 0.2);
+  border-color: #48bb78;
+  color: #48bb78;
+}
+
+.action-btn.sell.active {
+  background: rgba(245, 101, 101, 0.2);
+  border-color: #f56565;
+  color: #f56565;
+}
+
+.submit-btn {
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.submit-btn.buy {
+  background: linear-gradient(135deg, #38a169, #48bb78);
+  color: white;
+}
+
+.submit-btn.sell {
+  background: linear-gradient(135deg, #c53030, #e53e3e);
+  color: white;
+}
+
+.submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trade-msg {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.trade-msg.success {
+  background: rgba(72, 187, 120, 0.15);
+  color: #48bb78;
+  border: 1px solid rgba(72, 187, 120, 0.3);
+}
+
+.trade-msg.error {
+  background: rgba(245, 101, 101, 0.15);
+  color: #f56565;
+  border: 1px solid rgba(245, 101, 101, 0.3);
+}
+
+/* 信号 */
+.signals-section, .positions-section, .orders-section {
+  padding: 12px 16px;
+}
+
+.signals-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ws-status {
+  font-size: 13px;
+}
+
+.ws-status.online { color: #48bb78; }
+.ws-status.offline { color: #f56565; }
+
+.btn-clear {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(245, 101, 101, 0.1);
+  border: 1px solid rgba(245, 101, 101, 0.3);
+  color: #f56565;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signal-item {
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #667eea;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.signal-item.buy { border-left-color: #48bb78; }
+.signal-item.sell { border-left-color: #f56565; }
+
+.signal-top {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.signal-stock { font-weight: 600; font-size: 14px; }
+.signal-time { font-size: 11px; color: #64748b; }
+.signal-body { font-size: 13px; color: #94a3b8; }
+
+.empty-tip {
+  text-align: center;
+  color: #4a5568;
+  padding: 40px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* ========== BrokerPanel 移动端适配 ========== */
+@media (max-width: 768px) {
+  .account-cards {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .acc-card span {
+    font-size: 15px;
+  }
+
+  .broker-tabs {
+    gap: 2px;
+  }
+
+  .tab-btn {
+    font-size: 11px;
+    padding: 8px 6px;
+  }
+
+  .broker-table th,
+  .broker-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}

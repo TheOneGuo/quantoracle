@@ -1,0 +1,261 @@
+/* ========== Dashboard 大盘总览样式 ========== */
+
+.dashboard-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0e1a 0%, #0f172a 100%);
+  color: #f7fafc;
+  padding: 20px;
+  padding-bottom: 72px;
+}
+
+.dashboard-header {
+  margin-bottom: 20px;
+}
+
+.dashboard-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.dashboard-header p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}
+
+/* 指数卡片网格 */
+.market-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.market-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 4px solid #667eea;
+  border-radius: 12px;
+  padding: 14px;
+  transition: transform 0.2s;
+}
+
+.market-card:hover { transform: translateY(-2px); }
+
+.market-card-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.index-name { font-weight: 600; font-size: 14px; }
+.index-code { font-size: 11px; color: #64748b; }
+
+.price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.current-price { font-size: 20px; font-weight: 700; }
+
+.change { font-size: 14px; font-weight: 600; }
+.change.up { color: #48bb78; }
+.change.down { color: #f56565; }
+
+.detail-row, .range-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.detail-item, .range-item {
+  display: flex;
+  gap: 4px;
+}
+
+.detail-item label, .range-item label {
+  color: #64748b;
+}
+
+.up { color: #48bb78; }
+.down { color: #f56565; }
+
+.market-card-footer { margin-top: 8px; }
+
+.trend-indicator {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.trend-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* 统计区域 */
+.stats-section {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.stat-content h3 {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.stat-label { font-size: 12px; color: #64748b; font-weight: 400; }
+
+/* 信号列表 */
+.signals-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.section-header h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.btn-refresh {
+  padding: 6px 14px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #667eea;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.signals-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.signals-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.signals-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.signals-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stock-name { font-weight: 600; }
+.stock-code { color: #667eea; font-size: 12px; }
+
+.action-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reason { color: #94a3b8; }
+.time { color: #64748b; font-size: 12px; }
+
+.priority-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.priority-text { font-size: 12px; color: #94a3b8; }
+
+.loading {
+  text-align: center;
+  color: #64748b;
+  padding: 30px;
+}
+
+/* ========== 响应式适配 ========== */
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 12px;
+  }
+
+  .market-cards {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .market-card { padding: 10px; }
+  .current-price { font-size: 16px; }
+
+  .stats-section {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .stat-value { font-size: 16px; }
+
+  .signals-table table {
+    min-width: 480px;
+  }
+}
+
+@media (max-width: 480px) {
+  .market-cards {
+    grid-template-columns: 1fr;
+  }
+}

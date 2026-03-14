@@ -17,12 +17,17 @@ const klineAPI = new KLineAPI();
 const alertSystem = new AlertSystem();
 const feishu = new FeishuNotifier();
 const db = new Database();
+app.locals.db = db.db; // 将原始 SQLite db 实例挂到 app.locals，供 broker-routes 使用
 
 app.use(cors());
 app.use(express.json());
 
 // 自选股 & A股筛选路由
 watchlistRoutes(app, db, stockAPI);
+
+// 实盘对接路由（M5）
+const brokerRoutes = require('./broker/broker-routes');
+app.use('/api/broker', brokerRoutes);
 
 /**
  * 计算持仓汇总信息
@@ -536,12 +541,46 @@ app.get('/api/kline/:code', async (req, res) => {
   }
 });
 
-// 启动服务器
+// 启动服务器（支持 WebSocket）
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+const http = require('http');
+const { WebSocketServer } = require('ws');
+
+const server = http.createServer(app);
+
+/**
+ * WebSocket 服务器（M5：实盘信号推送）
+ * 客户端连接后，策略信号触发时会实时推送 signal 事件。
+ */
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+/** 广播消息给所有已连接的客户端 */
+function broadcast(data) {
+  const json = JSON.stringify(data);
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) { // WebSocket.OPEN
+      client.send(json);
+    }
+  });
+}
+
+wss.on('connection', (ws, req) => {
+  console.log('[WS] 客户端连接:', req.socket.remoteAddress);
+  ws.send(JSON.stringify({ type: 'connected', message: '实盘信号推送已就绪', timestamp: new Date().toISOString() }));
+
+  ws.on('close', () => {
+    console.log('[WS] 客户端断开');
+  });
+});
+
+// 将 broadcast 挂在 app 上，供其他模块使用
+app.broadcast = broadcast;
+
+server.listen(PORT, () => {
   console.log(`Stock Platform API running on port ${PORT}`);
   console.log(`Using data provider: ${process.env.STOCK_API_PROVIDER || 'sina'}`);
   console.log(`Database: SQLite (persistent storage)`);
+  console.log(`WebSocket: ws://localhost:${PORT}/ws`);
 });
 
 // DeepSeek AI API 代理

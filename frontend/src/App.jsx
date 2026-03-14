@@ -10,6 +10,7 @@ import GlobalMarkets from './components/GlobalMarkets'
 import StrategyTemplates from './components/StrategyTemplates'
 import Watchlist from './components/Watchlist'
 import ParadigmEditor from './components/ParadigmEditor'
+import BrokerPanel from './components/BrokerPanel'
 import './App.css'
 
 const API_BASE = 'http://localhost:3001/api'
@@ -1232,8 +1233,45 @@ function App() {
         <Route path="/globalmarkets" element={<GlobalMarkets />} />
         <Route path="/strategy" element={<StrategyTemplates />} />
         <Route path="/paradigms" element={<ParadigmEditor />} />
+        <Route path="/broker" element={<BrokerPanel />} />
       </Routes>
+
+      {/* 移动端底部 TabBar */}
+      <MobileTabBar location={location} navigate={navigate} />
     </div>
+  )
+}
+
+/**
+ * 移动端底部导航栏组件
+ * 仅在移动端（max-width: 768px）通过 CSS 显示
+ * @param {object} props
+ * @param {object} props.location - React Router location 对象
+ * @param {Function} props.navigate - React Router navigate 函数
+ */
+function MobileTabBar({ location, navigate }) {
+  const tabs = [
+    { path: '/', icon: '🏠', label: '首页' },
+    { path: '/analysis', icon: '🔥', label: '选股' },
+    { path: '/cloudmap', icon: '📊', label: '云图' },
+    { path: '/strategy', icon: '📋', label: '策略' },
+    { path: '/broker', icon: '💼', label: '实盘' },
+  ]
+
+  return (
+    <nav className="mobile-tabbar" role="navigation" aria-label="底部导航">
+      {tabs.map(tab => (
+        <button
+          key={tab.path}
+          className={`mobile-tabbar-item ${location.pathname === tab.path ? 'active' : ''}`}
+          onClick={() => navigate(tab.path)}
+          aria-label={tab.label}
+        >
+          <span className="tab-icon">{tab.icon}</span>
+          <span>{tab.label}</span>
+        </button>
+      ))}
+    </nav>
   )
 }
 

@@ -1732,3 +1732,189 @@ body {
   .panel.config-section { width: 320px; }
 }
 
+
+/* ========== M5: 移动端完整响应式适配 ========== */
+
+/* 底部 TabBar（仅移动端显示）*/
+.mobile-tabbar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* 底部 TabBar */
+  .mobile-tabbar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: rgba(10, 14, 26, 0.97);
+    border-top: 1px solid rgba(102, 126, 234, 0.3);
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+  }
+
+  .mobile-tabbar-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    color: #64748b;
+    transition: color 0.2s;
+    font-size: 10px;
+    border: none;
+    background: transparent;
+    padding: 4px 0;
+  }
+
+  .mobile-tabbar-item.active {
+    color: #667eea;
+  }
+
+  .mobile-tabbar-item .tab-icon {
+    font-size: 20px;
+  }
+
+  /* 为底部 TabBar 留出空间 */
+  .app {
+    padding-bottom: 60px;
+  }
+
+  /* Header 移动端：隐藏 ticker 和按钮组，保留 logo */
+  .header {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .logo .slogan {
+    display: none;
+  }
+
+  .logo .title {
+    font-size: 15px;
+  }
+
+  .market-ticker {
+    order: 3;
+    width: 100%;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 4px 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 桌面导航按钮在移动端隐藏（用底部 TabBar 代替）*/
+  .header-button-group {
+    display: none;
+  }
+
+  /* 主容器：三列 → 单列 */
+  .main-container {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 12px !important;
+  }
+
+  .left-column,
+  .middle-column,
+  .panel.config-section {
+    width: 100% !important;
+    min-width: unset !important;
+  }
+
+  /* 指数卡片：两列 */
+  .market-cards {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+
+  .market-card {
+    padding: 10px !important;
+  }
+
+  /* 信号表格：横向滚动 */
+  .signals-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .signals-table table {
+    min-width: 480px;
+  }
+
+  /* 统计卡片：两列 */
+  .stats-section {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* HotStockAnalysis 移动端适配 */
+  .dashboard {
+    min-height: auto;
+  }
+
+  .dash-header h1 {
+    font-size: 15px;
+  }
+
+  .filter-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px !important;
+  }
+
+  .stock-grid {
+    grid-template-columns: 1fr !important;
+    padding: 10px !important;
+    gap: 10px !important;
+  }
+
+  .stock-card {
+    padding: 12px !important;
+  }
+
+  /* 面板 padding 缩小 */
+  .panel {
+    padding: 12px !important;
+  }
+
+  /* 买卖表单字体缩小 */
+  .trade-form input,
+  .trade-form select,
+  .trade-form button {
+    font-size: 14px;
+  }
+
+  /* rules-grid：单列 */
+  .rules-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* holdings-list 高度自动 */
+  .holdings-list {
+    max-height: 300px;
+  }
+}
+
+/* ========== 平板适配（769px - 1024px）========== */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .main-container {
+    grid-template-columns: 1fr 300px !important;
+    gap: 12px;
+  }
+
+  .panel.config-section {
+    grid-column: span 2;
+  }
+
+  .market-cards {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+}
