@@ -1,7 +1,9 @@
 /**
- * 策略信用等级计算器
+ * @file gradeCalculator.js
+ * @description 策略信用等级计算器（PRD v1.0 §3.5.5）
+ * @module services/gradeCalculator
  *
- * 等级标准（PRD v1.0 §3.5.5）：
+ * 等级标准：
  *   S: 年化>30%, 夏普>2,   实盘盈利用户率>80%, 运行>1年
  *   A: 年化>20%, 夏普>1.5, 实盘盈利用户率>70%
  *   B: 年化>10%, 夏普>1,   实盘盈利用户率>60%

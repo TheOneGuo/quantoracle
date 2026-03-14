@@ -1,7 +1,17 @@
 /**
- * 策略广场 Mock 数据
- * 当数据库为空时使用，保证前端正常展示
- * 覆盖：A股/美股/港股，S/A/B/C 各等级，不同风格
+ * @file marketplace-mock.js
+ * @description 策略广场 Mock 数据（当数据库为空时使用，保证前端正常展示）
+ * @module mock/marketplace-mock
+ *
+ * 数据结构说明：
+ * - id: 策略唯一标识（字符串UUID）
+ * - creator_id / creator_name: 策略创建者
+ * - market: A股/美股/港股
+ * - style: conservative（保守）/ neutral（均衡）/ aggressive（激进）
+ * - grade: S/A/B/C 信用等级
+ * - backtest_metrics: 回测指标（annual_return/max_drawdown/sharpe/win_rate等）
+ * - live_metrics: 实盘指标（users/avg_profit/profit_user_rate/tracked_days）
+ * - price_monthly/price_yearly: 订阅价格（元，0=免费）
  */
 
 const MOCK_STRATEGIES = [

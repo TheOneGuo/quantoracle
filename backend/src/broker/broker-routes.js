@@ -106,14 +106,14 @@ router.post('/trade', async (req, res) => {
       });
     }
 
-    // P2: 写入 live_tracking 表（subscription_id 使用固定 mock 值）
+    // P2: 写入 live_tracking 表（纸交易时 subscription_id 填 NULL）
     if (ok && req.app && req.app.locals && req.app.locals.db) {
       const db = req.app.locals.db;
       db.run(
         `INSERT INTO live_tracking
            (subscription_id, strategy_id, signal_id, action, code, code_name, price, quantity, pnl, pnl_percent)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['mock-paper-trading', 'paper', order.orderId, action, String(code), String(code),
+        [null, 'paper', order.orderId, action, String(code), String(code),
           order.filledPrice || 0, parseInt(quantity, 10), 0, 0],
         (err) => { if (err) console.warn('[BrokerRoutes] live_tracking 写入失败:', err.message); }
       );

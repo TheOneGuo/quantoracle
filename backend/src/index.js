@@ -1,3 +1,9 @@
+/**
+ * @file index.js
+ * @description QuantOracle 后端主入口。注册所有 Express 路由、WebSocket 升级处理及定时任务。
+ * @module server
+ */
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -10,6 +16,9 @@ const AlertSystem = require('./alerts');
 const FeishuNotifier = require('./notifiers/feishu');
 const Database = require('./db');
 const SmartAnalyzer = require('./analyzer/smart');
+
+/** 单用户模式下统一使用的用户ID，避免硬编码散落在各路由 */
+const DEFAULT_USER_ID = 'default-user';
 
 const app = express();
 const stockAPI = new StockAPI(process.env.STOCK_API_PROVIDER || 'sina');
@@ -828,7 +837,7 @@ app.post('/api/ai/screen', async (req, res) => {
  */
 app.get('/api/usage/balance', async (req, res) => {
     try {
-        const userId = req.query.user_id || 'default';
+        const userId = req.query.user_id || DEFAULT_USER_ID;
         const balanceInfo = await db.getUserTokenBalance(userId);
         
         res.json({
@@ -858,7 +867,7 @@ app.get('/api/usage/balance', async (req, res) => {
  */
 app.get('/api/usage/history', async (req, res) => {
     try {
-        const userId = req.query.user_id || 'default';
+        const userId = req.query.user_id || DEFAULT_USER_ID;
         const limit = parseInt(req.query.limit) || 50;
         const offset = parseInt(req.query.offset) || 0;
         
@@ -891,7 +900,7 @@ app.get('/api/usage/history', async (req, res) => {
  */
 app.post('/api/usage/deduct', async (req, res) => {
     try {
-        const { user_id = 'default', usage_data } = req.body;
+        const { user_id = DEFAULT_USER_ID, usage_data } = req.body;
         
         if (!usage_data) {
             return res.status(400).json({
@@ -956,7 +965,7 @@ app.post('/api/usage/deduct', async (req, res) => {
  */
 app.get('/api/usage/stats', async (req, res) => {
     try {
-        const userId = req.query.user_id || 'default';
+        const userId = req.query.user_id || DEFAULT_USER_ID;
         const days = parseInt(req.query.days) || 30;
         
         const stats = await db.getTokenUsageStats(userId, days);
@@ -1009,7 +1018,7 @@ app.get('/api/usage/stats', async (req, res) => {
  */
 app.post('/api/usage/add', async (req, res) => {
     try {
-        const { user_id = 'default', tokens, purchase_method = 'system' } = req.body;
+        const { user_id = DEFAULT_USER_ID, tokens, purchase_method = 'system' } = req.body;
         
         if (!tokens || tokens <= 0) {
             return res.status(400).json({
@@ -1434,7 +1443,7 @@ app.get('/api/marketplace/strategies/:id', (req, res) => {
  * 发布策略（创作者）
  */
 app.post('/api/marketplace/strategies', (req, res) => {
-  const { name, description, market, style, tags, backtest_metrics, price_monthly = 0, price_yearly = 0, creator_id = 'anonymous' } = req.body;
+  const { name, description, market, style, tags, backtest_metrics, price_monthly = 0, price_yearly = 0, creator_id = DEFAULT_USER_ID } = req.body;
   if (!name || !market || !style) return res.status(400).json({ success: false, error: '缺少必填字段: name/market/style' });
 
   const id = randomUUID();
@@ -1457,7 +1466,7 @@ app.post('/api/marketplace/strategies', (req, res) => {
  * 订阅策略
  */
 app.post('/api/marketplace/subscribe', (req, res) => {
-  const { strategy_id, plan = 'monthly', user_id = 'anonymous' } = req.body;
+  const { strategy_id, plan = 'monthly', user_id = DEFAULT_USER_ID } = req.body;
   const strategy = MOCK_STRATEGIES.find(s => s.id === strategy_id) || {};
   const amount = plan === 'yearly' ? (strategy.price_yearly || 0) : (strategy.price_monthly || 0);
   const commission_rate = strategy.commission_rate || 0.20;

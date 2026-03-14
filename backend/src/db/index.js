@@ -1,7 +1,16 @@
+/**
+ * @file db/index.js
+ * @description SQLite 数据库封装，提供持仓、交易、预警、Token、策略广场等所有数据操作。
+ * @module db
+ */
+
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 class Database {
+  /**
+   * 构造函数：打开数据库文件并初始化所有表结构
+   */
   constructor() {
     const dbPath = path.join(__dirname, '../../data/stock.db');
     // 确保目录存在
@@ -19,8 +28,31 @@ class Database {
     this.init();
   }
 
+  /**
+   * 初始化所有数据库表并插入默认数据
+   * 使用 CREATE TABLE IF NOT EXISTS 保证幂等性
+   */
   init() {
-    // Token 余额表
+    // 启用外键约束（SQLite 默认关闭）
+    this.db.run('PRAGMA foreign_keys = ON');
+
+    // 用户主表（单用户模式，默认用户 'default-user'）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL DEFAULT 'admin',
+        role TEXT DEFAULT 'investor',
+        balance REAL DEFAULT 0,
+        token_balance INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 插入默认用户（单用户模式）
+    this.db.run(`INSERT OR IGNORE INTO users (id, username) VALUES ('default-user', 'admin')`);
+
+    // Token 余额表（记录 AI 调用消耗，与 users.balance 用途不同）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS user_tokens (
         user_id TEXT PRIMARY KEY,
@@ -30,7 +62,8 @@ class Database {
         last_purchase_date DATETIME,
         last_consumption_date DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
       )
     `);
 
@@ -183,10 +216,11 @@ class Database {
     `);
 
     // 实盘跟踪表（记录购买用户的实际盈亏）
+    // subscription_id 允许 NULL，纸交易时填 NULL（不关联具体订阅）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS live_tracking (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        subscription_id TEXT NOT NULL,
+        subscription_id INTEGER,
         strategy_id TEXT NOT NULL,
         signal_id TEXT,
         action TEXT NOT NULL,             -- buy/sell
@@ -196,8 +230,7 @@ class Database {
         quantity INTEGER,
         pnl REAL,
         pnl_percent REAL,
-        executed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+        executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -215,7 +248,12 @@ class Database {
     `);
   }
 
-  // 添加或更新持仓
+  /**
+   * 添加或更新持仓（UPSERT）
+   * @param {string} code - 股票代码
+   * @param {string} name - 股票名称
+   * @returns {Promise<{code: string, name: string}>}
+   */
   async addHolding(code, name) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -232,7 +270,14 @@ class Database {
     });
   }
 
-  // 添加买入交易记录
+  /**
+   * 添加买入交易记录
+   * @param {string} code - 股票代码
+   * @param {number} buyPrice - 买入价格
+   * @param {number} quantity - 数量
+   * @param {string} buyDate - 买入日期（YYYY-MM-DD）
+   * @returns {Promise<{id: number, code: string, buyPrice: number, quantity: number, buyDate: string, type: 'buy'}>}
+   */
   async addTrade(code, buyPrice, quantity, buyDate) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -247,7 +292,14 @@ class Database {
     });
   }
 
-  // 添加卖出交易记录
+  /**
+   * 添加卖出交易记录
+   * @param {string} code - 股票代码
+   * @param {number} sellPrice - 卖出价格
+   * @param {number} quantity - 数量
+   * @param {string} sellDate - 卖出日期（YYYY-MM-DD）
+   * @returns {Promise<{id: number, code: string, sellPrice: number, quantity: number, sellDate: string, type: 'sell'}>}
+   */
   async addSellTrade(code, sellPrice, quantity, sellDate) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -262,7 +314,10 @@ class Database {
     });
   }
 
-  // 获取所有持仓
+  /**
+   * 获取所有持仓（含交易明细，按更新时间降序）
+   * @returns {Promise<Array>} 持仓数组，每项含 trades 子数组
+   */
   async getHoldings() {
     return new Promise((resolve, reject) => {
       this.db.all(
@@ -307,7 +362,11 @@ class Database {
     });
   }
 
-  // 删除持仓
+  /**
+   * 删除持仓（级联删除关联交易记录）
+   * @param {string} code - 股票代码
+   * @returns {Promise<{deleted: boolean}>}
+   */
   async deleteHolding(code) {
     return new Promise((resolve, reject) => {
       this.db.run('DELETE FROM holdings WHERE code = ?', [code], function(err) {
@@ -317,7 +376,11 @@ class Database {
     });
   }
 
-  // 删除单条交易记录
+  /**
+   * 删除单条交易记录
+   * @param {number} tradeId - 交易记录 ID
+   * @returns {Promise<{deleted: boolean}>}
+   */
   async deleteTrade(tradeId) {
     return new Promise((resolve, reject) => {
       this.db.run('DELETE FROM trades WHERE id = ?', [tradeId], function(err) {
@@ -327,7 +390,18 @@ class Database {
     });
   }
 
-  // 记录预警
+  /**
+   * 记录预警到数据库
+   * @param {Object} alert - 预警对象
+   * @param {string} alert.code - 股票代码
+   * @param {string} alert.action - 动作（如 BUY/SELL/HOLD）
+   * @param {string} alert.actionDesc - 动作描述
+   * @param {string} alert.reason - 触发原因
+   * @param {number} alert.currentPrice - 当前价格
+   * @param {number} alert.avgCost - 平均成本
+   * @param {number} alert.changePercent - 涨跌幅
+   * @returns {Promise<{id: number}>}
+   */
   async addAlert(alert) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -342,7 +416,11 @@ class Database {
     });
   }
 
-  // 获取最近的预警
+  /**
+   * 获取最近的预警记录（含股票名称）
+   * @param {number} [limit=50] - 最大返回条数
+   * @returns {Promise<Array>}
+   */
   async getRecentAlerts(limit = 50) {
     return new Promise((resolve, reject) => {
       this.db.all(
@@ -360,7 +438,12 @@ class Database {
     });
   }
 
-  // 检查是否最近已发送相同提醒（1小时内）
+  /**
+   * 检查是否在最近1小时内已发送过相同预警（防重复通知）
+   * @param {string} code - 股票代码
+   * @param {string} action - 动作
+   * @returns {Promise<boolean>}
+   */
   async hasRecentAlert(code, action) {
     return new Promise((resolve, reject) => {
       this.db.get(
@@ -378,7 +461,10 @@ class Database {
 
   // ========== 翻倍推荐股票相关操作 ==========
 
-  // 添加或更新翻倍推荐股票
+  /** 添加或更新翻倍推荐股票（UPSERT）
+   * @param {Object} stock - 股票数据
+   * @returns {Promise<{id: number, code: string}>}
+   */
   async addDoublingRecommendation(stock) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -405,7 +491,9 @@ class Database {
     });
   }
 
-  // 获取所有翻倍推荐股票
+  /** 获取所有翻倍推荐股票（按添加时间降序）
+   * @returns {Promise<Array>}
+   */
   async getDoublingRecommendations() {
     return new Promise((resolve, reject) => {
       this.db.all(
@@ -419,7 +507,10 @@ class Database {
     });
   }
 
-  // 删除翻倍推荐股票
+  /** 删除翻倍推荐股票
+   * @param {string} code
+   * @returns {Promise<{deleted: boolean}>}
+   */
   async deleteDoublingRecommendation(code) {
     return new Promise((resolve, reject) => {
       this.db.run('DELETE FROM doubling_recommendations WHERE code = ?', [code], function(err) {
@@ -429,7 +520,9 @@ class Database {
     });
   }
 
-  // 清空所有翻倍推荐（用于重新分析时）
+  /** 清空所有翻倍推荐（重新分析时使用）
+   * @returns {Promise<{deleted: number}>}
+   */
   async clearDoublingRecommendations() {
     return new Promise((resolve, reject) => {
       this.db.run('DELETE FROM doubling_recommendations', function(err) {
@@ -441,7 +534,10 @@ class Database {
 
   // ========== 意向分析股票相关操作 ==========
 
-  // 添加意向分析股票
+  /** 添加或更新意向分析股票（UPSERT）
+   * @param {Object} stock
+   * @returns {Promise<{id: number, code: string}>}
+   */
   async addAnalysisStock(stock) {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -463,7 +559,9 @@ class Database {
     });
   }
 
-  // 获取所有意向分析股票
+  /** 获取所有意向分析股票（按添加时间降序）
+   * @returns {Promise<Array>}
+   */
   async getAnalysisStocks() {
     return new Promise((resolve, reject) => {
       this.db.all(
@@ -477,7 +575,10 @@ class Database {
     });
   }
 
-  // 删除意向分析股票
+  /** 删除意向分析股票
+   * @param {string} code
+   * @returns {Promise<{deleted: boolean}>}
+   */
   async deleteAnalysisStock(code) {
     return new Promise((resolve, reject) => {
       this.db.run('DELETE FROM analysis_stocks WHERE code = ?', [code], function(err) {
@@ -489,8 +590,12 @@ class Database {
 
   // ========== Token 管理相关操作 ==========
 
-  // 获取用户Token余额
-  async getUserTokenBalance(userId = 'default') {
+  /**
+   * 获取用户 Token 余额
+   * @param {string} [userId='default-user'] - 用户ID
+   * @returns {Promise<{balance: number, purchased_total: number, consumed_total: number, last_purchase_date: string|null, last_consumption_date: string|null}>}
+   */
+  async getUserTokenBalance(userId = 'default-user') {
     return new Promise((resolve, reject) => {
       this.db.get(
         `SELECT balance, purchased_total, consumed_total, last_purchase_date, last_consumption_date
@@ -509,8 +614,12 @@ class Database {
     });
   }
 
-  // 初始化用户Token记录
-  async initializeUserTokens(userId = 'default') {
+  /**
+   * 初始化用户 Token 记录（默认赠送 10000 个 Token）
+   * @param {string} [userId='default-user'] - 用户ID
+   * @returns {Promise<{balance: number, purchased_total: number, consumed_total: number}>}
+   */
+  async initializeUserTokens(userId = 'default-user') {
     return new Promise((resolve, reject) => {
       // 默认赠送10000个token
       const initialBalance = 10000;
@@ -531,7 +640,21 @@ class Database {
     });
   }
 
-  // 扣除Token（记录使用）
+  /**
+   * 扣除 Token（写入使用记录并更新余额，事务操作）
+   * @param {string} userId - 用户ID
+   * @param {Object} usageData - 使用数据
+   * @param {string} usageData.function_name - 功能名称
+   * @param {string} usageData.model_id - 使用的模型ID
+   * @param {number} [usageData.tokens_input] - 输入Token数
+   * @param {number} [usageData.tokens_output] - 输出Token数
+   * @param {number} [usageData.tokens_total] - 总Token数
+   * @param {number} [usageData.cost_usd] - 美元成本
+   * @param {string} [usageData.request_id] - 请求追踪ID
+   * @param {Object} [usageData.metadata] - 额外元数据
+   * @returns {Promise<{usage_id: number, new_balance: number, tokens_deducted: number}>}
+   * @throws {Error} 余额不足时抛出 'Insufficient token balance'
+   */
   async deductTokens(userId, usageData) {
     return new Promise((resolve, reject) => {
       // 开始事务
@@ -624,7 +747,13 @@ class Database {
     });
   }
 
-  // 充值Token
+  /**
+   * 充值 Token（UPSERT：首次创建记录或增加余额）
+   * @param {string} userId - 用户ID
+   * @param {number} tokens - 充值数量
+   * @param {string} [purchaseMethod='system'] - 充值方式
+   * @returns {Promise<{new_balance: number, tokens_added: number, purchase_method: string}>}
+   */
   async addTokens(userId, tokens, purchaseMethod = 'system') {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -657,8 +786,14 @@ class Database {
     });
   }
 
-  // 获取Token使用历史记录
-  async getTokenUsageHistory(userId = 'default', limit = 50, offset = 0) {
+  /**
+   * 获取 Token 使用历史记录（分页）
+   * @param {string} [userId='default-user'] - 用户ID
+   * @param {number} [limit=50] - 最大返回条数
+   * @param {number} [offset=0] - 分页偏移量
+   * @returns {Promise<Array>} 使用记录数组（metadata 已解析为对象）
+   */
+  async getTokenUsageHistory(userId = 'default-user', limit = 50, offset = 0) {
     return new Promise((resolve, reject) => {
       this.db.all(
         `SELECT * FROM token_usage 
@@ -681,8 +816,13 @@ class Database {
     });
   }
 
-  // 获取Token使用统计
-  async getTokenUsageStats(userId = 'default', days = 30) {
+  /**
+   * 获取 Token 使用统计（按日期/模型/功能分组聚合）
+   * @param {string} [userId='default-user'] - 用户ID
+   * @param {number} [days=30] - 统计最近多少天
+   * @returns {Promise<Array>} 统计数组
+   */
+  async getTokenUsageStats(userId = 'default-user', days = 30) {
     return new Promise((resolve, reject) => {
       this.db.all(
         `SELECT 
@@ -704,7 +844,9 @@ class Database {
     });
   }
 
-  // 关闭数据库
+  /** 关闭数据库连接
+   * @returns {void}
+   */
   close() {
     this.db.close();
   }
