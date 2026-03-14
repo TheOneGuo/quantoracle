@@ -32,3 +32,7 @@ logs/
 # SQLite DB
 *.db
 *.sqlite
+
+# Telegram session files
+*.session
+tg_session*
