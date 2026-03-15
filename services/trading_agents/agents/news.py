@@ -5,6 +5,8 @@
 
 import logging
 import random
+import os
+import requests
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -31,6 +33,9 @@ class NewsAgent:
         self.llm_client = get_llm_client()
         self.rules_engine = NewsRulesEngine()
         self.name = "News Agent"
+        
+        # 后端新闻服务地址（通过环境变量配置，默认本地）
+        self._backend_url = os.environ.get('BACKEND_URL', 'http://localhost:3001')
         
         # 模拟新闻缓存（实际应用中应从新闻API获取）
         self._news_cache = {}
@@ -92,37 +97,67 @@ class NewsAgent:
     
     def _get_news_events(self, code: str, name: Optional[str], industry: Optional[str]) -> List[Dict]:
         """
-        获取相关新闻事件（第一期使用模拟数据）
+        从后端 /api/news/stock/:code 接口获取真实新闻事件。
+        若接口不可用（网络异常、超时），降级到模拟数据作为兜底。
         
         Args:
-            code: 股票代码
+            code: 股票代码（如 sh600519）
             name: 股票名称
             industry: 所属行业
             
         Returns:
-            新闻事件列表，每项包含 type, title, content, date
+            新闻事件列表，每项包含 type, title, content, date, source
         """
-        # 使用缓存
         cache_key = f"{code}_{industry}"
         if cache_key in self._news_cache:
             return self._news_cache[cache_key]
         
-        # 基于代码生成确定性但看起来随机的新闻事件
+        # ── 优先：从后端真实新闻接口拉取 ────────────────────────────
+        try:
+            url = f"{self._backend_url}/api/news/stock/{code}"
+            resp = requests.get(url, timeout=5, params={"count": 10})
+            resp.raise_for_status()
+            payload = resp.json()
+            
+            # 后端返回格式：{ success: true, data: [...] } 或 { items: [...] }
+            raw_items = []
+            if isinstance(payload, dict):
+                raw_items = payload.get("data", payload.get("items", []))
+            elif isinstance(payload, list):
+                raw_items = payload
+            
+            if raw_items:
+                events = []
+                for item in raw_items[:10]:  # 最多取10条
+                    events.append({
+                        "type":    item.get("category", item.get("type", "市场资讯")),
+                        "title":   item.get("title", ""),
+                        "content": item.get("content", item.get("summary", item.get("title", ""))),
+                        "date":    item.get("pub_date", item.get("date", item.get("publishTime", ""))),
+                        "source":  item.get("source", item.get("src", "东方财富")),
+                        # 影响分数由规则引擎二次计算，初始置 0
+                        "impact_score": item.get("score", 0)
+                    })
+                
+                logger.info(f"NewsAgent: 从后端获取到 {len(events)} 条真实新闻（{code}）")
+                self._news_cache[cache_key] = events
+                return events
+        
+        except Exception as e:
+            # 后端不可达或返回异常，降级到模拟数据
+            logger.warning(f"NewsAgent: 后端新闻接口不可用，降级到模拟数据：{e}")
+        
+        # ── 兜底：生成模拟数据 ────────────────────────────────────────
         random.seed(hash(cache_key) % 1000)
-        
         events = []
-        
-        # 随机生成0-3个新闻事件
         num_events = random.randint(0, 3)
         
-        # 预定义的新闻类型和模板
         news_templates = [
             {
                 "type": "业绩公告",
                 "templates": [
                     "公司发布业绩预告，预计{period}净利润同比增长{growth}%",
                     "公司{period}报告显示，营收达{revenue}亿元，净利润{profit}亿元",
-                    "公司发布业绩快报，{period}实现扭亏为盈"
                 ]
             },
             {
@@ -136,32 +171,14 @@ class NewsAgent:
                 "type": "政策影响",
                 "templates": [
                     "{policy}政策出台，预计对{industry}行业产生{impact}影响",
-                    "国家发布{policy}规划，{industry}行业迎来发展机遇"
                 ]
             },
-            {
-                "type": "行业动态",
-                "templates": [
-                    "{industry}行业需求旺盛，产品价格持续上涨",
-                    "{industry}行业面临产能过剩压力，竞争加剧"
-                ]
-            },
-            {
-                "type": "公司治理",
-                "templates": [
-                    "公司高管增持{shares}万股，彰显信心",
-                    "公司发布股权激励计划，覆盖{employees}名核心员工"
-                ]
-            }
         ]
         
-        # 生成新闻事件
         for i in range(num_events):
-            template_group = random.choice(news_templates)
-            template = random.choice(template_group["templates"])
-            
-            # 填充模板变量
-            news_content = template.format(
+            tpl_group = random.choice(news_templates)
+            tpl = random.choice(tpl_group["templates"])
+            content = tpl.format(
                 period=random.choice(["一季度", "上半年", "前三季度", "全年"]),
                 growth=random.randint(-30, 100),
                 revenue=random.randint(10, 500),
@@ -171,21 +188,17 @@ class NewsAgent:
                 policy=random.choice(["碳中和", "数字经济", "自主可控", "高质量发展"]),
                 industry=industry or "相关",
                 impact=random.choice(["正面", "负面", "中性"]),
-                shares=random.randint(10, 100),
-                employees=random.randint(50, 500)
             )
-            
-            # 生成日期（最近30天内）
             days_ago = random.randint(1, 30)
+            from datetime import timedelta
             news_date = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
-            
             events.append({
-                "type": template_group["type"],
-                "title": f"{name or code}{template_group['type']}",
-                "content": news_content,
-                "date": news_date,
-                "source": "模拟数据",
-                "impact_score": random.uniform(-0.3, 0.3)  # -0.3到0.3的影响分数
+                "type":         tpl_group["type"],
+                "title":        f"{name or code}{tpl_group['type']}",
+                "content":      content,
+                "date":         news_date,
+                "source":       "模拟数据",
+                "impact_score": random.uniform(-0.3, 0.3)
             })
         
         self._news_cache[cache_key] = events

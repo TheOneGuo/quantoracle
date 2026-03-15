@@ -1,10 +1,13 @@
 """
 情绪分析 Agent
-分析市场情绪指标：北向资金/融资余额/龙虎榜，暂用模拟数据
+分析市场情绪指标：北向资金/融资余额/龙虎榜
+优先接入 AkShare 真实数据，降级时使用模拟数据
 """
 
 import logging
 import random
+import os
+import requests
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
@@ -80,74 +83,111 @@ class SentimentAgent:
     
     def _get_sentiment_metrics(self, code: str, name: Optional[str]) -> Dict[str, Any]:
         """
-        获取情绪指标（第一期使用模拟数据）
+        获取情绪指标：优先从 AkShare 接入真实北向资金/融资余额，降级到模拟数据。
+        
+        真实数据源：
+        - 北向资金：东方财富接口（AkShare 封装的北向资金）
+        - 融资余额：东方财富融资融券接口
         
         Args:
-            code: 股票代码
+            code: 股票代码（如 sh600519）
             name: 股票名称
             
         Returns:
-            情绪指标字典，包含模拟数据
+            情绪指标字典
         """
-        # 使用缓存或生成新的模拟数据
         if code in self._sentiment_cache:
             return self._sentiment_cache[code]
         
-        # 基于代码生成确定性但看起来随机的数据
-        random.seed(hash(code) % 1000)  # 基于代码的确定性随机
+        # 提取纯数字代码
+        pure_code = code.replace('sh', '').replace('sz', '')
         
-        # 模拟北向资金流向（亿元）
-        northbound_flow = random.uniform(-5, 10)  # -5到10亿之间
+        northbound_flow  = None  # 北向资金净流入（亿元）
+        margin_change    = None  # 融资余额变化（亿元）
+        is_real_data     = False
         
-        # 模拟融资余额变化（亿元）
-        margin_change = random.uniform(-3, 8)  # -3到8亿之间
+        # ── 尝试通过 AkShare 获取真实北向资金 ──────────────────────────
+        try:
+            import akshare as ak
+            
+            # 北向资金（当日沪深港通个股资金流向）
+            # ak.stock_hsgt_individual_em 返回个股陆股通持股数据
+            # 更稳定：用大盘北向资金接口获取当日整体情绪参考
+            try:
+                df_nb = ak.stock_hsgt_north_net_flow_in_em(symbol="沪深港通")
+                if df_nb is not None and not df_nb.empty:
+                    latest_nb = df_nb.iloc[-1]
+                    # 列名可能为"资金流向" "净买入"等，取最后一列数字
+                    for col in df_nb.columns:
+                        val = latest_nb[col]
+                        if isinstance(val, (int, float)) and abs(val) > 0.001:
+                            northbound_flow = float(val)
+                            break
+                    is_real_data = True
+            except Exception as nb_err:
+                logger.debug(f"北向资金接口异常: {nb_err}")
+            
+            # 融资余额变化（个股）
+            try:
+                today_str = datetime.now().strftime("%Y%m%d")
+                week_ago  = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+                df_margin = ak.stock_margin_detail_em(
+                    symbol=pure_code,
+                    start_date=week_ago,
+                    end_date=today_str
+                )
+                if df_margin is not None and len(df_margin) >= 2:
+                    # 计算最近两个交易日融资余额变化
+                    latest_bal = float(df_margin.iloc[-1].get("融资余额", 0) or 0)
+                    prev_bal   = float(df_margin.iloc[-2].get("融资余额", 0) or 0)
+                    margin_change = (latest_bal - prev_bal) / 1e8  # 转亿元
+                    is_real_data  = True
+            except Exception as mg_err:
+                logger.debug(f"融资余额接口异常: {mg_err}")
         
-        # 模拟换手率（%）
-        turnover_rate = random.uniform(1, 15)  # 1-15%
+        except ImportError:
+            logger.warning("AkShare 未安装，情绪指标降级到模拟数据")
+        except Exception as e:
+            logger.warning(f"AkShare 接口调用失败，降级到模拟数据：{e}")
         
-        # 模拟成交额（亿元）
-        volume_amount = random.uniform(5, 50)  # 5-50亿
+        # ── 兜底：用确定性随机填充缺失字段 ────────────────────────────
+        random.seed(hash(code) % 1000)
+        if northbound_flow is None:
+            northbound_flow = random.uniform(-5, 10)
+        if margin_change is None:
+            margin_change = random.uniform(-3, 8)
         
-        # 模拟龙虎榜机构净买入（万元）
-        institutional_net_buy = random.uniform(-5000, 10000)  # -5000到10000万
+        turnover_rate       = random.uniform(1, 15)   # 换手率（%）
+        volume_amount       = random.uniform(5, 50)   # 成交额（亿元）
+        institutional_net_buy = random.uniform(-5000, 10000)  # 龙虎榜机构净买（万元）
+        news_sentiment      = random.uniform(30, 80)  # 舆情情绪（0-100）
         
-        # 模拟舆情情绪分数（0-100）
-        news_sentiment = random.uniform(30, 80)
-        
-        # 计算综合情绪
-        overall_score = 0.0
+        # ── 综合评分计算 ────────────────────────────────────────────────
+        overall_score    = 0.0
         positive_factors = 0
-        total_factors = 6
+        total_factors    = 6
         
         if northbound_flow > 0:
-            overall_score += northbound_flow / 10  # 最大贡献1.0
+            overall_score += northbound_flow / 10
             positive_factors += 1
-        
         if margin_change > 0:
-            overall_score += margin_change / 8  # 最大贡献1.0
+            overall_score += margin_change / 8
             positive_factors += 1
-        
-        if turnover_rate > 3:  # 换手率适中偏高表示活跃
+        if turnover_rate > 3:
             overall_score += min(turnover_rate / 15, 1.0) * 0.5
             positive_factors += 1
-        
         if institutional_net_buy > 0:
             overall_score += min(institutional_net_buy / 10000, 1.0) * 0.5
             positive_factors += 1
-        
         if news_sentiment > 50:
-            overall_score += (news_sentiment - 50) / 50  # 50-100映射到0-1
+            overall_score += (news_sentiment - 50) / 50
             positive_factors += 1
-        
-        # 成交额适中为好，过高过低都不佳
         if 10 < volume_amount < 30:
             overall_score += 0.3
             positive_factors += 1
         
-        # 归一化到0-1
         normalized_score = overall_score / total_factors if total_factors > 0 else 0.5
         
-        # 确定情绪方向
         if normalized_score > 0.6:
             overall_sentiment = "bullish"
         elif normalized_score < 0.4:
@@ -156,20 +196,20 @@ class SentimentAgent:
             overall_sentiment = "neutral"
         
         metrics = {
-            "code": code,
-            "name": name or "未知",
-            "northbound_flow": round(northbound_flow, 2),  # 亿元
-            "margin_change": round(margin_change, 2),  # 亿元
-            "turnover_rate": round(turnover_rate, 2),  # %
-            "volume_amount": round(volume_amount, 2),  # 亿元
+            "code":               code,
+            "name":               name or "未知",
+            "northbound_flow":    round(northbound_flow, 2),      # 亿元
+            "margin_change":      round(margin_change, 2),         # 亿元
+            "turnover_rate":      round(turnover_rate, 2),         # %
+            "volume_amount":      round(volume_amount, 2),         # 亿元
             "institutional_net_buy": round(institutional_net_buy, 2),  # 万元
-            "news_sentiment": round(news_sentiment, 2),  # 0-100
-            "positive_factors": positive_factors,
-            "total_factors": total_factors,
-            "overall_sentiment": overall_sentiment
+            "news_sentiment":     round(news_sentiment, 2),        # 0-100
+            "positive_factors":   positive_factors,
+            "total_factors":      total_factors,
+            "overall_sentiment":  overall_sentiment,
+            "is_real_data":       is_real_data,                    # 标记是否为真实数据
         }
         
-        # 缓存结果（实际应用中应有过期时间）
         self._sentiment_cache[code] = metrics
         return metrics
     
