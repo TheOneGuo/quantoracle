@@ -874,6 +874,85 @@ class Database {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // ===== 对账/提现/退款/黑名单新增表 =====
+
+    // 发布者钱包账本（每笔资金流水明细）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publisher_id TEXT NOT NULL,
+        entry_type TEXT NOT NULL,             -- income/withdrawal/refund_deduct/bond_release/platform_fee
+        amount REAL NOT NULL,                 -- 正=入账 负=出账
+        related_subscription_id INTEGER,
+        related_review_id INTEGER,
+        lock_until DATETIME,                  -- T+7解冻时间，NULL=已解冻
+        bond_release_at DATETIME,             -- 保证金释放时间（到账后+1个月），NULL=不涉及保证金
+        status TEXT DEFAULT 'pending',        -- pending/available/withdrawn/deducted
+        note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 发布者提现申请
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_withdrawals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publisher_id TEXT NOT NULL,
+        apply_amount REAL NOT NULL,
+        actual_amount REAL NOT NULL,          -- 实际到账（apply × 90%）
+        bond_amount REAL NOT NULL,            -- 保证金（apply × 10%）
+        bond_release_at DATETIME NOT NULL,
+        status TEXT DEFAULT 'pending',        -- pending/approved/rejected/completed
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME
+      )
+    `);
+
+    // 发布者钱包汇总
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_wallet (
+        publisher_id TEXT PRIMARY KEY,
+        total_earned REAL DEFAULT 0,
+        available_balance REAL DEFAULT 0,
+        locked_balance REAL DEFAULT 0,
+        bond_balance REAL DEFAULT 0,
+        total_withdrawn REAL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // subscriptions 表补充字段（如字段不存在则追加，已存在则忽略）
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN consecutive_months INTEGER DEFAULT 0`, () => {});
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN upgrade_offer_shown INTEGER DEFAULT 0`, () => {});
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN upgrade_offer_accepted INTEGER DEFAULT 0`, () => {});
+
+    // 用户7日内退款记录
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS user_refund_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        subscription_id INTEGER NOT NULL,
+        refund_type TEXT NOT NULL,            -- early_7d / review_50pct
+        refund_amount REAL NOT NULL,
+        refunded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 用户订阅黑名单
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS user_subscription_bans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL UNIQUE,
+        ban_type TEXT NOT NULL,               -- temp_1month / permanent
+        ban_reason TEXT,
+        ban_count INTEGER DEFAULT 0,
+        early_refund_count INTEGER DEFAULT 0,
+        ban_until DATETIME,                   -- NULL=永久封禁
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   }
 
   /**
