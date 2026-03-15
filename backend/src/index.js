@@ -2694,4 +2694,100 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
+// ─── 模拟盘验证系统 M1 定时任务 ─────────────────────────────────────────────
+
+const simEngine = require('./services/sim-trading-engine');
+
+/**
+ * 判断今天是否为交易日（简单排除周末，节假日需接入交易日历API）
+ * @returns {boolean}
+ */
+function isTradingDay() {
+  const day = new Date().getDay(); // 0=周日, 6=周六
+  return day !== 0 && day !== 6;
+}
+
+/**
+ * 每个交易日 09:25 — 为所有运行中的模拟盘生成模拟策略信号
+ * 生产环境应接入真实策略引擎，此处生成示例信号用于测试
+ */
+cron.schedule('25 9 * * 1-5', async () => {
+  if (!isTradingDay()) return;
+  console.log('[SimCron] 09:25 开始为运行中的模拟盘生成策略信号...');
+  try {
+    const runningSessions = await db.all(
+      `SELECT id, strategy_id FROM sim_trading_sessions WHERE status = 'running'`
+    );
+    for (const session of runningSessions) {
+      try {
+        // TODO: 接入真实策略引擎获取信号
+        // 此处为示例占位逻辑，实际应调用策略计算模块
+        console.log(`[SimCron] 策略 ${session.strategy_id} 会话 ${session.id} 信号生成（待接入策略引擎）`);
+      } catch (err) {
+        console.error(`[SimCron] 会话 ${session.id} 信号生成失败:`, err.message);
+      }
+    }
+    console.log(`[SimCron] 信号生成完成，共 ${runningSessions.length} 个会话`);
+  } catch (err) {
+    console.error('[SimCron] 信号生成任务出错:', err.message);
+  }
+});
+
+/**
+ * 每个交易日 09:30-15:00 每分钟 — 更新所有运行中模拟盘的持仓实时价格
+ * 生产环境需接入行情API（如聚宽/东财/同花顺），目前使用随机模拟价格
+ */
+cron.schedule('*/1 9-15 * * 1-5', async () => {
+  if (!isTradingDay()) return;
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  // 精确到交易时段：09:30-11:30 和 13:00-15:00
+  const inMorningSession = hour === 9 ? minute >= 30 : hour === 10 || hour === 11 ? true : false;
+  const inAfternoonSession = hour === 13 || hour === 14 || (hour === 15 && minute === 0);
+  if (!inMorningSession && !inAfternoonSession) return;
+
+  try {
+    const runningSessions = await db.all(
+      `SELECT id FROM sim_trading_sessions WHERE status = 'running'`
+    );
+    for (const session of runningSessions) {
+      try {
+        await simEngine.updateHoldingPrices(session.id);
+      } catch (err) {
+        console.error(`[SimCron] 会话 ${session.id} 价格更新失败:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[SimCron] 价格更新任务出错:', err.message);
+  }
+});
+
+/**
+ * 每个交易日 15:05 — 收盘快照 + 检查30天是否完成
+ * 快照完成后自动触发完成检测，30天到期则状态改为 completed
+ */
+cron.schedule('5 15 * * 1-5', async () => {
+  if (!isTradingDay()) return;
+  console.log('[SimCron] 15:05 开始收盘快照...');
+  try {
+    const runningSessions = await db.all(
+      `SELECT id FROM sim_trading_sessions WHERE status = 'running'`
+    );
+    for (const session of runningSessions) {
+      try {
+        const snapshot = await simEngine.takeDailySnapshot(session.id);
+        if (snapshot) {
+          console.log(`[SimCron] 会话 ${session.id} 快照完成：总资产 ${snapshot.totalAssets?.toFixed(2)}`);
+        }
+      } catch (err) {
+        console.error(`[SimCron] 会话 ${session.id} 收盘快照失败:`, err.message);
+      }
+    }
+    console.log(`[SimCron] 收盘快照完成，共 ${runningSessions.length} 个会话`);
+  } catch (err) {
+    console.error('[SimCron] 收盘快照任务出错:', err.message);
+  }
+});
+
 module.exports = app;
