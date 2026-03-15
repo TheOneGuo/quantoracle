@@ -6,6 +6,11 @@
 from typing import List, Dict, Any
 from datetime import datetime
 
+# 导入QuantConnect数据标准化模式枚举
+# DataNormalizationMode.Adjusted 表示使用复权价格，
+# 与后端拉取的 hfq（后复权）数据保持一致，确保回测数据一致性。
+from QuantConnect import DataNormalizationMode
+
 class BaseStrategy:
     """
     基础策略模板类
@@ -284,7 +289,7 @@ class QuantOracleBaseStrategy(QCAlgorithm):
             else:
                 symbol = f"Symbol.Create(\"{code}\", SecurityType.Equity, Market.USA)"
             
-            code_lines.append(f"        self.AddEquity({symbol})")
+            code_lines.append(f"        # 【复权设置】dataNormalizationMode=DataNormalizationMode.Adjusted\n        # 使Lean引擎在回测时自动对价格进行复权处理，与后端 hfq 数据对齐。\n        # 若不设置，Lean默认使用原始价格（Raw），遇到除权会产生价格跳空。\n        self.AddEquity({symbol}, dataNormalizationMode=DataNormalizationMode.Adjusted)")
         
         return '\n'.join(code_lines)
     
