@@ -256,16 +256,151 @@ function normalizeMessage(rawMsg, sourceAlias, sourceWeight) {
   };
 }
 
+// ─────────────────────────────────────────────────────────
+// 内容增强：清洗 / 股票提取 / 关键词 / 跨源去重
+// ─────────────────────────────────────────────────────────
+
+/**
+ * 清洗内容：去除 HTML 标签、多余空格、emoji（保留中英文、数字、标点）
+ * @param {string} raw
+ * @returns {string}
+ */
+function cleanContent(raw) {
+  return (raw || '')
+    .replace(/<[^>]+>/g, ' ')           // 去 HTML 标签
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // 去掉常见 emoji 范围（Miscellaneous Symbols, Dingbats, Emoticons 等）
+    .replace(/[\u2600-\u27BF\u{1F000}-\u{1FFFF}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 从文本中提取股票代码
+ * @param {string} text
+ * @returns {{ aShare: string[], hkShare: string[], usShare: string[] }}
+ */
+function extractStockCodes(text) {
+  // A股：6位纯数字，首位为 0/3/6（沪深）
+  const aShare = [...new Set((text.match(/\b(60\d{4}|00\d{4}|30\d{4})\b/g) || []))];
+  // 港股：5位数字（00700 等），避免和A股重叠
+  const hkShare = [...new Set((text.match(/\b(0[0-9]{4})\b/g) || []))]
+    .filter(c => !aShare.includes(c));
+  // 美股：2-5位全大写英文字母（如 AAPL、TSLA、BRK）
+  const usShare = [...new Set((text.match(/\b[A-Z]{2,5}\b/g) || []))]
+    .filter(c => !/^(AI|BTC|ETH|CEO|CPI|PMI|GDP|IPO|ETF|VPN|FBI|CIA|TSA|NBC|OKX|CEX|SPX|FIU)$/.test(c));
+  return { aShare, hkShare, usShare };
+}
+
+/**
+ * 根据频道类型提取关键词元数据
+ * @param {string} text - 清洗后的正文
+ * @param {string} srcType - finance_flash|macro_policy|stock_unusual|northbound|...
+ * @returns {Object}
+ */
+function extractChannelMeta(text, srcType) {
+  const meta = {};
+  if (srcType === 'finance_flash') {
+    // 时间戳 HH:MM
+    const times = text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/g);
+    if (times) meta.timestamps = times;
+    // 紧急词
+    const urgent = text.match(/突发|速报|重磅|紧急|快讯/g);
+    if (urgent) meta.urgentKeywords = [...new Set(urgent)];
+  } else if (srcType === 'macro_policy') {
+    const policy = text.match(/央行|降准|降息|加息|利率|PMI|CPI|PPI|GDP|货币政策|财政政策|国常会|政治局|人民币/g);
+    if (policy) meta.policyKeywords = [...new Set(policy)];
+  } else if (srcType === 'stock_unusual') {
+    const unusual = text.match(/涨停|跌停|龙虎榜|大单|封板|炸板|换手率|异动|拉升|跳水/g);
+    if (unusual) meta.unusualKeywords = [...new Set(unusual)];
+  } else if (srcType === 'northbound') {
+    // 资金金额：XX亿
+    const funds = text.match(/[\d,.]+\s*亿/g);
+    if (funds) meta.fundAmounts = funds;
+    const direction = text.match(/净买入|净卖出|北向|南向|陆股通|港股通/g);
+    if (direction) meta.flowKeywords = [...new Set(direction)];
+  }
+  return meta;
+}
+
+/**
+ * 计算文本 MD5 哈希（用于去重）
+ * 不引入外部依赖，使用 crypto 内置模块
+ */
+const crypto = require('crypto');
+
+function md5(text) {
+  return crypto.createHash('md5').update(text).digest('hex');
+}
+
+/**
+ * 跨源去重缓存（jin10light / jin10data 可能发相同新闻）
+ * key: 内容hash -> { sourceKey, ts }
+ * @type {Map<string, {sourceKey: string, ts: number}>}
+ */
+const _crossSourceDedup = new Map();
+const CROSS_DEDUP_TTL = 10 * 60 * 1000; // 10分钟内跨源去重
+
+/**
+ * 检查并登记跨源去重（仅对 jin10light / jin10data 生效）
+ * @param {string} contentHash
+ * @param {string} sourceKey
+ * @returns {boolean} true = 是重复项，应跳过
+ */
+function checkCrossSourceDup(contentHash, sourceKey) {
+  const crossSources = ['jin10light', 'jin10data'];
+  if (!crossSources.includes(sourceKey)) return false;
+
+  const now = Date.now();
+  // 清理过期
+  for (const [k, v] of _crossSourceDedup.entries()) {
+    if (now - v.ts > CROSS_DEDUP_TTL) _crossSourceDedup.delete(k);
+  }
+
+  if (_crossSourceDedup.has(contentHash)) {
+    const prev = _crossSourceDedup.get(contentHash);
+    if (prev.sourceKey !== sourceKey) {
+      console.log(`[tg-news-fetcher] 跨源去重: ${sourceKey} 与 ${prev.sourceKey} 重复`);
+      return true;
+    }
+  } else {
+    _crossSourceDedup.set(contentHash, { sourceKey, ts: now });
+  }
+  return false;
+}
+
 /**
  * 将 RSS 条目标准化为 NewsItem
  * @param {Object} item  - parseRSS 返回的条目
  * @param {string} sourceAlias
  * @param {number} sourceWeight
- * @returns {NewsItem}
+ * @param {string} [srcType] - 频道类型（可选，用于关键词增强）
+ * @param {string} [sourceKey] - 频道key（用于跨源去重）
+ * @returns {NewsItem|null} 返回 null 表示是跨源重复项
  */
-function normalizeRSSItem(item, sourceAlias, sourceWeight) {
-  // 优先使用 description（含正文），title 作为补充，去除HTML标签
-  const content = (item.description || item.title || '').replace(/<[^>]+>/g, '').trim();
+function normalizeRSSItem(item, sourceAlias, sourceWeight, srcType = '', sourceKey = '') {
+  // 优先使用 description（含正文），title 作为补充，清洗 HTML 和 emoji
+  const rawContent = item.description || item.title || '';
+  const content = cleanContent(rawContent);
+
+  // 计算内容哈希（用于去重）
+  const dedup_hash = md5(content.slice(0, 200)); // 取前200字符做哈希
+
+  // 跨源去重检测
+  if (checkCrossSourceDup(dedup_hash, sourceKey)) {
+    return null; // 跨源重复，跳过
+  }
+
+  // 提取股票代码
+  const stocks = extractStockCodes(content);
+
+  // 提取频道类型特定关键词
+  const channelMeta = srcType ? extractChannelMeta(content, srcType) : {};
+
   return {
     id: null,
     raw_id: item.guid || item.link || '',
@@ -278,8 +413,10 @@ function normalizeRSSItem(item, sourceAlias, sourceWeight) {
     views: 0,
     source_weight: sourceWeight,
     score: null,
-    category: null,
-    dedup_hash: null,
+    category: srcType || null,
+    dedup_hash,
+    stocks,           // { aShare, hkShare, usShare }
+    channelMeta,      // 按频道类型提取的关键词
   };
 }
 
@@ -292,6 +429,11 @@ module.exports = {
   fetchFromBotAPI,
   normalizeMessage,
   normalizeRSSItem,
+  // 内容增强工具（方便测试）
+  cleanContent,
+  extractStockCodes,
+  extractChannelMeta,
+  checkCrossSourceDup,
   // 内部工具也暴露，方便测试
   parseRSS,
   httpGet,
