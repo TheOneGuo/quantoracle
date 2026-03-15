@@ -351,4 +351,88 @@ router.get('/strategies/:id', async (req, res) => {
   }
 });
 
+// 引入订阅管理服务（双重定价模式 + 宽限期管理）
+const subscriptionManager = require('../services/subscription-manager');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/strategy/:id/set-lifetime-price
+// 发布者设置终身定价（仅 S/S+ 可调用）
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/strategy/:id/set-lifetime-price', async (req, res) => {
+  try {
+    // 从请求头或 session 获取发布者身份（生产环境替换为 JWT 中间件）
+    const publisherId = req.headers['x-publisher-id'] || req.session?.publisherId;
+    if (!publisherId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const strategyId = req.params.id;
+    const { lifetime_price } = req.body;
+
+    if (typeof lifetime_price !== 'number' || lifetime_price < 0) {
+      return res.status(400).json({ success: false, error: 'lifetime_price 必须为非负数字' });
+    }
+
+    const result = await subscriptionManager.setLifetimePricing(db, publisherId, strategyId, lifetime_price);
+    if (!result.success) {
+      return res.status(403).json({ success: false, error: result.reason, suggested: result.suggested });
+    }
+
+    res.json({ success: true, lifetimePrice: result.lifetimePrice, suggested: result.suggested });
+  } catch (err) {
+    console.error('[marketplace] set-lifetime-price error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/subscription/renew
+// 订阅者续费（月订阅）
+// Body: { strategy_id: number }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/subscription/renew', async (req, res) => {
+  try {
+    const subscriberId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!subscriberId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const { strategy_id } = req.body;
+    if (!strategy_id) return res.status(400).json({ success: false, error: '缺少 strategy_id' });
+
+    const result = await subscriptionManager.renewSubscription(db, subscriberId, strategy_id);
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.reason });
+    }
+
+    res.json({ success: true, newExpiresAt: result.newExpiresAt });
+  } catch (err) {
+    console.error('[marketplace] subscription/renew error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/subscription/status/:strategyId
+// 订阅者查看自己对某策略的订阅状态（是否在宽限期、到期时间等）
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/subscription/status/:strategyId', async (req, res) => {
+  try {
+    const subscriberId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!subscriberId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const { strategyId } = req.params;
+    const status = await subscriptionManager.checkSubscriptionActive(db, subscriberId, strategyId);
+
+    res.json({
+      success: true,
+      subscription: {
+        active:    status.active,
+        type:      status.type,       // 'monthly' | 'lifetime' | null
+        expiresAt: status.expiresAt,  // 到期时间（终身订阅为 null）
+        inGrace:   status.inGrace,    // 是否在宽限期内
+      },
+    });
+  } catch (err) {
+    console.error('[marketplace] subscription/status error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

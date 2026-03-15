@@ -140,6 +140,8 @@ const strategyRulesRouter = require('./api/strategy-rules');
 const executionHistoryRouter = require('./api/execution-history');
 const marketplaceRouter      = require('./api/marketplace');
 const publisherRatingRouter  = require('./api/publisher-rating');
+// 订阅管理服务（宽限期检查）
+const subscriptionManager    = require('./services/subscription-manager');
 // 将 db 实例挂到 app 供路由使用
 app.set('db', db.db);
 app.use('/api/strategy', strategyRulesRouter);
@@ -3117,6 +3119,22 @@ cron.schedule('1 0 1 * *', async () => {
     }
   } catch (err) {
     console.error('[M3-SettleCron] 月度结算任务出错:', err.message);
+  }
+}, { timezone: 'Asia/Shanghai' });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 每小时检查一次月订阅宽限期（M8：双重定价模式）
+// 到期 3 天后停止信号推送，随时续费可立即恢复
+// ─────────────────────────────────────────────────────────────────────────────
+cron.schedule('0 * * * *', async () => {
+  console.log('[M8-GraceCron] 检查月订阅宽限期...');
+  try {
+    const { stopped } = await subscriptionManager.processExpiredSubscriptions(db);
+    if (stopped > 0) {
+      console.log(`[M8-GraceCron] 已停止 ${stopped} 个到期订阅的信号推送`);
+    }
+  } catch (err) {
+    console.error('[M8-GraceCron] 宽限期检查出错:', err.message);
   }
 }, { timezone: 'Asia/Shanghai' });
 

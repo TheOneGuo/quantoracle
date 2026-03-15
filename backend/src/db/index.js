@@ -851,6 +851,29 @@ class Database {
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_trades_session ON sim_trades(session_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_snapshots_session ON sim_daily_snapshots(session_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_holdings_session ON sim_holdings(session_id)`);
+
+    // ─── M8：双重定价模式（月+终身）新增字段 ───
+    // strategies 表：新增终身定价和定价模式字段（忽略列已存在错误）
+    this.db.run(`ALTER TABLE strategies ADD COLUMN lifetime_price REAL DEFAULT NULL`, () => {});
+    this.db.run(`ALTER TABLE strategies ADD COLUMN pricing_mode TEXT DEFAULT 'monthly'`, () => {});
+    // subscriptions 表：新增终身订阅、宽限期、信号推送开关字段
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN sub_type TEXT DEFAULT 'monthly'`, () => {});
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN grace_end_at DATETIME`, () => {});
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN signal_push_enabled INTEGER DEFAULT 1`, () => {});
+    this.db.run(`ALTER TABLE subscriptions ADD COLUMN auto_renew INTEGER DEFAULT 1`, () => {});
+
+    // 退款记录表（评级变动价格截断后退还差价）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS refund_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,           -- 退款受益用户
+        strategy_id INTEGER NOT NULL,    -- 关联策略
+        refund_amount REAL NOT NULL,     -- 退款金额（元）
+        refund_reason TEXT,              -- 退款原因说明
+        status TEXT DEFAULT 'pending',   -- pending/processed/failed
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   }
 
   /**

@@ -5,6 +5,8 @@
  */
 
 const axios = require('axios');
+// 引入订阅管理服务，用于推送前检查订阅有效性（月订阅宽限期 / 终身订阅）
+const subscriptionManager = require('./subscription-manager');
 
 // ============================================================
 // 消息格式化
@@ -237,12 +239,33 @@ async function sendFeishu(webhookUrl, message) {
  * @param {Array} channels 推送渠道配置 [{type:'telegram', webhook:'...'}, ...]
  * @returns {Promise<{success: boolean, sent_channels: string[], failed_channels: string[]}>}
  */
-async function pushSignal(signal, channels) {
+/**
+ * 推送信号到指定渠道列表（批量推送给策略订阅者）
+ *
+ * @param {Object} signal 信号对象（来自 strategy_signals 表）
+ * @param {Array}  channels 渠道配置列表 [{type, webhook, subscriberId}]
+ * @param {object|null} db 数据库实例（传入时进行订阅有效性检查，不传则跳过检查）
+ * @returns {Promise<{ success: boolean, sent_channels: string[], failed_channels: string[], skipped: number }>}
+ */
+async function pushSignal(signal, channels, db = null) {
   const sent_channels = [];
   const failed_channels = [];
+  let skipped = 0;
 
   for (const channel of channels) {
-    const { type, webhook } = channel;
+    const { type, webhook, subscriberId } = channel;
+
+    // 订阅有效性检查：若传入 db 且 channel 携带 subscriberId，则校验订阅状态
+    // 月订阅宽限期结束或未续费者跳过推送；终身订阅和有效月订阅正常推送
+    if (db && subscriberId && signal.strategy_id) {
+      const { active } = await subscriptionManager.checkSubscriptionActive(db, subscriberId, signal.strategy_id);
+      if (!active) {
+        // 订阅已失效（宽限期结束 / 未续费），跳过该订阅者，不推送
+        skipped++;
+        continue;
+      }
+    }
+
     try {
       const message = formatSignalMessage(signal, type);
 
@@ -265,7 +288,7 @@ async function pushSignal(signal, channels) {
   }
 
   const success = sent_channels.length > 0;
-  return { success, sent_channels, failed_channels };
+  return { success, sent_channels, failed_channels, skipped };
 }
 
 /**
