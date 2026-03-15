@@ -165,7 +165,9 @@ def save_lean_data(code: str, lean_df: pd.DataFrame, output_dir: str):
         os.makedirs(output_dir, exist_ok=True)
         
         # 构造文件路径
-        csv_path = os.path.join(output_dir, f"{clean_code}.csv")
+        # 文件名加 _hfq 后缀，与非复权（不含adjust参数）数据明确区分，
+        # 防止混用导致回测价格序列不连续或除权缺口错误。
+        csv_path = os.path.join(output_dir, f"{clean_code}_hfq.csv")
         
         # 保存为CSV（无索引，无表头）
         lean_df.to_csv(csv_path, index=False, header=False)
@@ -180,7 +182,12 @@ def save_lean_data(code: str, lean_df: pd.DataFrame, output_dir: str):
 def generate_mock_data(code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     生成模拟数据（当后端API不可用时）
-    
+
+    【注意】本函数使用随机游走算法生成价格序列，不含真实除权/除息缺口，
+    因此天然规避了复权问题（无需 hfq/qfq 调整）。
+    但模拟数据与真实市场行情无关，仅供开发调试使用。
+    生产环境回测必须使用真实 hfq 后复权数据，否则策略结果不可信。
+
     Args:
         code: 股票代码
         start_date: 开始日期 YYYY-MM-DD
@@ -245,6 +252,7 @@ async def ensure_data_exists(code: str, start_date: str, end_date: str) -> bool:
     """
     try:
         # 尝试从后端获取数据
+        print(f"[DataConverter] 使用后复权(hfq)模式获取 {code} 历史数据")
         df = await fetch_ashare_history(code, start_date, end_date)
         
         if df is None or df.empty:
