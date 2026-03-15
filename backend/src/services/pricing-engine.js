@@ -5,6 +5,8 @@
  */
 
 const db = require('../db');
+// 引入发布者评级×资金档次定价矩阵
+const pricingCaps = require('../config/pricing-caps');
 
 /**
  * 从环境变量加载权重配置
@@ -69,8 +71,18 @@ const COMMISSION_TIERS = [
  * @param {number} simResult.gradeScore      综合评分（0-100）
  * @returns {{ monthly: number, annual: number, perSignal: number, risk_level: string, priority: string }}
  */
+/**
+ * calcInitialPrice 新增参数说明：
+ * @param {string} [simResult.publisherGrade]  发布者综合评级（S+/S/A/B/C/D）
+ * @param {string} [simResult.pricingTier]     定价档次（10w/50w/200w），区别于资金档位 capitalTier
+ *
+ * 当传入 publisherGrade 和 pricingTier 时，AI建议价将被评级矩阵上限截断。
+ * - 若评级为 C（禁止发布），直接抛出错误
+ * - 若评级为 D，月费强制归零
+ */
 function calcInitialPrice(simResult) {
-  const { capitalTier, avgCashUsageRate, monthReturn, avgDailySignals, missCount, gradeScore } = simResult;
+  const { capitalTier, avgCashUsageRate, monthReturn, avgDailySignals, missCount, gradeScore,
+          publisherGrade, pricingTier } = simResult;
 
   // 1. 基础价格（按资金档位）
   let baseMonthly = CAPITAL_TIER_BASE_PRICE[capitalTier] || CAPITAL_TIER_BASE_PRICE.small;
@@ -113,7 +125,31 @@ function calcInitialPrice(simResult) {
   if (gradeScore >= 90 && missCount === 0) priority = 'top';
   else if (gradeScore >= 75) priority = 'high';
 
-  return { monthly, annual, perSignal, risk_level, priority };
+  // 11. 评级矩阵约束：若传入 publisherGrade 和 pricingTier，对 AI 建议价施加上限截断
+  let finalMonthly = monthly;
+  let capsApplied = null;
+  if (publisherGrade && pricingTier) {
+    const cap = pricingCaps.getInitialPriceCap(publisherGrade, pricingTier);
+    if (cap === null) {
+      // C级：当月禁止发布
+      throw new Error(`当前评级（${publisherGrade}）本月禁止发布策略`);
+    }
+    if (cap === 0) {
+      // D级：强制免费
+      return { monthly: 0, annual: 0, perSignal: 0, risk_level, priority, capsApplied: 'D级发布者策略强制免费' };
+    }
+    // 截断至初始定价上限（AI建议价不超过矩阵上限）
+    if (monthly > cap) {
+      finalMonthly = cap;
+      capsApplied = `AI建议价已截断至评级（${publisherGrade}）×档次（${pricingTier}）初始定价上限 ${cap} 元`;
+    }
+  }
+
+  // 年费和信号费基于最终月费重新计算
+  const finalAnnual = finalMonthly * 10;
+  const finalPerSignal = parseFloat((finalMonthly / Math.max(avgDailySignals * 20, 1)).toFixed(2));
+
+  return { monthly: finalMonthly, annual: finalAnnual, perSignal: finalPerSignal, risk_level, priority, capsApplied };
 }
 
 // ============================================================
@@ -197,6 +233,21 @@ async function calcPriceAdjustment(strategyId, direction) {
   });
 
   if (!currentPricing) throw new Error(`策略 ${strategyId} 无定价记录`);
+
+  // 查询策略所属发布者评级及资金档次，用于调价天花板约束
+  const strategyInfo = await new Promise((resolve, reject) => {
+    const dbConn = db.getInstance ? db.getInstance() : db;
+    dbConn.get(
+      `SELECT s.capital_tier, pr.grade AS publisher_grade
+       FROM strategies s
+       LEFT JOIN publisher_ratings pr ON pr.publisher_id = s.publisher_id
+       WHERE s.id = ?
+       ORDER BY pr.calculated_at DESC
+       LIMIT 1`,
+      [strategyId],
+      (err, row) => err ? reject(err) : resolve(row)
+    );
+  });
 
   // 获取同档位策略均价
   const tierAvg = await new Promise((resolve, reject) => {
@@ -306,7 +357,23 @@ async function calcPriceAdjustment(strategyId, direction) {
   };
 
   const multiplier = direction === 'up' ? (1 + change_pct / 100) : (1 - change_pct / 100);
-  const new_price_monthly = Math.ceil(currentPricing.price_monthly * multiplier / 5) * 5;
+  const rawNewPrice = Math.ceil(currentPricing.price_monthly * multiplier / 5) * 5;
+
+  // 评级矩阵天花板约束：调价后价格不超过发布者评级×档次的绝对上限（截断而非拒绝）
+  let new_price_monthly = rawNewPrice;
+  let ceilingTruncated = false;
+  const publisherGrade = strategyInfo?.publisher_grade;
+  // capital_tier 在 DB 中存储为 micro/small/medium/large/xlarge，需映射到定价档次 10w/50w/200w
+  // 若策略表直接存储 10w/50w/200w 格式则无需映射
+  const pricingTier = strategyInfo?.capital_tier; // 若格式不同需做映射
+  if (publisherGrade && pricingTier) {
+    const { newPrice, truncated } = pricingCaps.applyGradeChange(rawNewPrice, publisherGrade, pricingTier);
+    new_price_monthly = newPrice;
+    ceilingTruncated = truncated;
+    if (truncated) {
+      reasons.push(`调价结果已截断至评级（${publisherGrade}）×档次（${pricingTier}）天花板 ${newPrice} 元`);
+    }
+  }
 
   const reasons = [];
   if (direction === 'up') {
@@ -324,6 +391,7 @@ async function calcPriceAdjustment(strategyId, direction) {
     reasons,
     new_price_monthly,
     old_price_monthly: currentPricing.price_monthly,
+    ceiling_truncated: ceilingTruncated, // 是否被评级天花板截断
     comparison_scores,  // 兼容旧接口
     dim_scores,         // 各维度得分明细（0-10分，供调价报告展示）
     percentiles,        // 各维度分位值（0-1）
