@@ -2796,4 +2796,206 @@ cron.schedule('5 15 * * 1-5', async () => {
   }
 });
 
+// ============================================================
+// M3 定时任务：未响应检测 + T+1顺延推送 + 月度结算
+// ============================================================
+
+/**
+ * 每5分钟：检查超时未响应信号
+ * 查找所有 expires_at < NOW() 且 push_status='sent' 的信号
+ * 标记为 no_response，更新 strategy_miss_stats，触发警告/暂停机制
+ */
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    // 查找所有超时未响应信号
+    const expiredSignals = await db.all(`
+      SELECT ss.*, s.publisher_id
+      FROM strategy_signals ss
+      JOIN strategies s ON ss.strategy_id = s.id
+      WHERE ss.expires_at < datetime('now')
+        AND ss.push_status = 'sent'
+    `);
+
+    if (!expiredSignals || expiredSignals.length === 0) return;
+
+    console.log(`[M3-MissCron] 发现 ${expiredSignals.length} 个超时未响应信号`);
+
+    const month = new Date().toISOString().slice(0, 7);
+
+    for (const signal of expiredSignals) {
+      // 标记为 no_response
+      await db.run(`UPDATE strategy_signals SET push_status='no_response' WHERE id=?`, [signal.id]);
+
+      // 更新未响应统计
+      await db.run(`
+        INSERT INTO strategy_miss_stats (strategy_id, stat_month, total_position_signals, no_response_count, status_impact)
+        VALUES (?, ?, 1, 1, 'normal')
+        ON CONFLICT(strategy_id, stat_month) DO UPDATE SET
+          total_position_signals = total_position_signals + 1,
+          no_response_count = no_response_count + 1
+      `, [signal.strategy_id, month]);
+
+      // 查询当前次数，决定状态
+      const stats = await db.get(
+        `SELECT no_response_count FROM strategy_miss_stats WHERE strategy_id=? AND stat_month=?`,
+        [signal.strategy_id, month]
+      );
+      const cnt = stats?.no_response_count || 0;
+      let status_impact = 'normal';
+      if (cnt >= 10) status_impact = 'suspended';
+      else if (cnt >= 7) status_impact = 'warning_orange';
+      else if (cnt >= 4) status_impact = 'warning_yellow';
+
+      await db.run(
+        `UPDATE strategy_miss_stats SET status_impact=?, miss_rate=CAST(no_response_count AS REAL)/CAST(total_position_signals AS REAL)
+         WHERE strategy_id=? AND stat_month=?`,
+        [status_impact, signal.strategy_id, month]
+      );
+
+      // 达到10次：自动暂停策略
+      if (status_impact === 'suspended') {
+        await db.run(`UPDATE strategies SET status='suspended' WHERE id=?`, [signal.strategy_id]);
+        await db.run(`
+          INSERT INTO incident_log (incident_type, affected_strategy_id, affected_signal_id, description, auto_handled)
+          VALUES ('suspend', ?, ?, '策略当月未响应次数达10次，系统自动暂停', 1)
+        `, [signal.strategy_id, signal.id]);
+        console.log(`[M3-MissCron] 策略 ${signal.strategy_id} 已因10次未响应被自动暂停`);
+      }
+    }
+  } catch (err) {
+    console.error('[M3-MissCron] 未响应检测任务出错:', err.message);
+  }
+});
+
+/**
+ * 每日 09:25（工作日）：处理T+1顺延信号
+ * 查找昨日标记 need_t1_followup=true 或 is_t1_followup=1 且 scheduled_date=今日 的信号
+ * 推送给发布者
+ */
+cron.schedule('25 9 * * 1-5', async () => {
+  if (!isTradingDay()) return;
+  console.log('[M3-T1Cron] 09:25 处理T+1顺延信号...');
+  try {
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // 查找今日需要推送的T+1顺延信号
+    const t1Signals = await db.all(`
+      SELECT ss.*, s.publisher_id, s.push_channels
+      FROM strategy_signals ss
+      JOIN strategies s ON ss.strategy_id = s.id
+      WHERE ss.is_t1_followup = 1
+        AND ss.scheduled_date = ?
+        AND ss.push_status = 'pending'
+    `, [todayStr]);
+
+    if (!t1Signals || t1Signals.length === 0) {
+      console.log('[M3-T1Cron] 无T+1顺延信号需处理');
+      return;
+    }
+
+    const { pushSignal } = require('./services/signal-pusher');
+
+    for (const signal of t1Signals) {
+      try {
+        const channels = JSON.parse(signal.push_channels || '[]');
+        const result = await pushSignal(signal, channels);
+
+        // 更新推送状态
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        await db.run(
+          `UPDATE strategy_signals SET push_status='sent', pushed_at=CURRENT_TIMESTAMP, expires_at=? WHERE id=?`,
+          [expiresAt, signal.id]
+        );
+
+        if (!result.success) {
+          // 记录推送失败事件
+          await db.run(`
+            INSERT INTO incident_log (incident_type, affected_strategy_id, affected_signal_id, description, auto_handled)
+            VALUES ('push_failure', ?, ?, ?, 1)
+          `, [signal.strategy_id, signal.id, `T+1顺延信号推送失败: ${result.failed_channels.join(',')}`]);
+        }
+      } catch (e) {
+        console.error(`[M3-T1Cron] 顺延信号 ${signal.id} 推送出错:`, e.message);
+      }
+    }
+
+    console.log(`[M3-T1Cron] T+1顺延信号处理完成，共 ${t1Signals.length} 条`);
+  } catch (err) {
+    console.error('[M3-T1Cron] T+1顺延任务出错:', err.message);
+  }
+}, { timezone: 'Asia/Shanghai' });
+
+/**
+ * 每月1日 00:01：触发上月结算计算
+ * 计算所有发布者上月收入，扣除评价返现和平台抽成，生成 publisher_settlements 记录
+ */
+cron.schedule('1 0 1 * *', async () => {
+  console.log('[M3-SettleCron] 月度结算开始...');
+  try {
+    const now = new Date();
+    // 上月月份字符串 YYYY-MM
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      .toISOString().slice(0, 7);
+
+    // 查询上月所有有订阅的发布者
+    const publishers = await db.all(`
+      SELECT DISTINCT s.publisher_id
+      FROM subscriptions sub
+      JOIN strategies s ON sub.strategy_id = s.id
+      WHERE sub.month = ? AND sub.status = 'active'
+    `, [lastMonth]);
+
+    const { calcInitialPrice, getCurrentCommissionRate } = require('./services/pricing-engine');
+
+    for (const { publisher_id } of publishers) {
+      try {
+        // 计算上月总收入（所有订阅费之和）
+        const revenue = await db.get(`
+          SELECT COALESCE(SUM(sub.amount), 0) AS total
+          FROM subscriptions sub
+          JOIN strategies s ON sub.strategy_id = s.id
+          WHERE s.publisher_id = ? AND sub.month = ? AND sub.status = 'active'
+        `, [publisher_id, lastMonth]);
+
+        const grossRevenue = revenue?.total || 0;
+
+        // 计算差评返现总额（已通过审核但尚未结清的）
+        const refunds = await db.get(`
+          SELECT COALESCE(SUM(r.refund_amount), 0) AS total
+          FROM strategy_reviews r
+          JOIN strategies s ON r.strategy_id = s.id
+          WHERE s.publisher_id = ? AND r.subscription_month = ?
+            AND r.ai_audit_status = 'approved' AND r.refund_paid = 1
+        `, [publisher_id, lastMonth]);
+
+        const reviewRefunds = refunds?.total || 0;
+
+        // 获取当前平台抽成档位
+        const commissionRate = await getCurrentCommissionRate();
+        const platformCommission = (grossRevenue - reviewRefunds) * commissionRate;
+        const netPayout = grossRevenue - reviewRefunds - platformCommission;
+
+        const settlementId = require('crypto').randomUUID();
+
+        // 生成结算记录（IGNORE 防止重复）
+        await db.run(`
+          INSERT OR IGNORE INTO publisher_settlements
+            (id, publisher_id, settlement_month, gross_revenue, review_refunds,
+             platform_commission, commission_rate, net_payout, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        `, [settlementId, publisher_id, lastMonth, grossRevenue, reviewRefunds,
+            platformCommission, commissionRate, netPayout]);
+
+        console.log(`[M3-SettleCron] 发布者 ${publisher_id} ${lastMonth} 结算完成：净收入 ${netPayout.toFixed(2)}`);
+      } catch (e) {
+        console.error(`[M3-SettleCron] 发布者 ${publisher_id} 结算失败:`, e.message);
+      }
+    }
+
+    console.log(`[M3-SettleCron] 月度结算完成，共处理 ${publishers.length} 位发布者`);
+  } catch (err) {
+    console.error('[M3-SettleCron] 月度结算任务出错:', err.message);
+  }
+}, { timezone: 'Asia/Shanghai' });
+
 module.exports = app;
