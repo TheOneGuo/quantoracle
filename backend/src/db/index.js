@@ -412,6 +412,59 @@ class Database {
     // sentiment 和 urgency 字段在更早的 migration 中可能已存在，这里幂等执行
     this.db.run(`ALTER TABLE news_processed ADD COLUMN sentiment TEXT DEFAULT '中性'`, () => {});
     this.db.run(`ALTER TABLE news_processed ADD COLUMN urgency TEXT DEFAULT 'normal'`, () => {});
+
+    // ── 视频OCR实盘数据识别模块（一期）──────────────────────────────────
+
+    // 挑战码表：用于防伪验证，用户录制视频前获取，视频中需展示该码
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS broker_challenges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        challenge_code TEXT NOT NULL,       -- 4位随机数字码
+        used INTEGER DEFAULT 0,             -- 是否已使用
+        expires_at DATETIME NOT NULL,       -- 有效期10分钟
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 实盘视频记录表：存储每次上传视频的元数据和验证结果
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS broker_video_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        video_path TEXT NOT NULL,
+        app_type TEXT,                          -- 'tonghuashun' | 'eastmoney' | 'unknown'
+        upload_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        video_time TEXT,                        -- 视频中识别的系统时间 HH:MM
+        challenge_code TEXT,                    -- 用户使用的挑战码
+        challenge_verified INTEGER DEFAULT 0,   -- 挑战码验证是否通过
+        time_verified INTEGER DEFAULT 0,        -- 时间戳验证是否通过
+        is_static_detected INTEGER DEFAULT 0,   -- 是否检测到静态图（防伪）
+        ocr_raw TEXT,                           -- OCR原始JSON结果
+        confidence_score REAL,                  -- 置信度 0-1
+        status TEXT DEFAULT 'pending'           -- pending/verified/rejected
+      )
+    `);
+
+    // 实盘持仓记录表：OCR提取的结构化持仓数据
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS broker_holdings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        video_record_id INTEGER REFERENCES broker_video_records(id),
+        stock_code TEXT NOT NULL,           -- 6位股票代码
+        stock_name TEXT,                    -- 股票中文名称
+        quantity INTEGER,                   -- 持有数量（股）
+        avg_cost REAL,                      -- 持仓均价（元）
+        current_price REAL,                 -- 最新价（元）
+        profit_amount REAL,                 -- 盈亏金额（元）
+        profit_pct REAL,                    -- 盈亏比例（%）
+        market_value REAL,                  -- 持仓市值（元）
+        recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_broker_holdings_user ON broker_holdings(user_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_broker_challenges_user ON broker_challenges(user_id)`);
   }
 
   /**
