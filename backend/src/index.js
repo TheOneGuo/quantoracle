@@ -1893,7 +1893,7 @@ app.delete('/api/knowledge/paradigms/:id', async (req, res) => {
 // 策略广场 API（M3）
 // =============================================
 const { MOCK_STRATEGIES } = require('./mock/marketplace-mock');
-const { calculateGrade } = require('./services/gradeCalculator');
+const { calculateGrade, calculateGradeWithLive } = require('./services/gradeCalculator');
 // 用 crypto 生成 UUID，避免额外依赖
 const { randomUUID } = require('crypto');
 
@@ -1936,8 +1936,9 @@ app.get('/api/marketplace/strategies', (req, res) => {
 
 /**
  * 获取策略详情（先查数据库，fallback 到 mock）
+ * 同时返回 live_verified 字段（是否有≥3条实盘持仓记录）
  */
-app.get('/api/marketplace/strategies/:id', (req, res) => {
+app.get('/api/marketplace/strategies/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const row = db.db && db.db.prepare('SELECT * FROM strategies WHERE id = ?').get(id);
@@ -1948,10 +1949,23 @@ app.get('/api/marketplace/strategies/:id', (req, res) => {
         live_metrics: typeof row.live_metrics === 'string' ? JSON.parse(row.live_metrics || '{}') : row.live_metrics,
         tags: typeof row.tags === 'string' ? JSON.parse(row.tags || '[]') : row.tags,
       };
+      // 查询实盘验证状态（broker_holdings）
+      try {
+        const { liveVerified, liveRecordCount } = await calculateGradeWithLive(strategy, strategy.live_metrics, db.db);
+        strategy.live_verified = liveVerified;
+        strategy.live_record_count = liveRecordCount;
+      } catch (_) {
+        strategy.live_verified = false;
+        strategy.live_record_count = 0;
+      }
       return res.json({ success: true, strategy });
     }
   } catch (e) { /* ignore, fallback below */ }
   const mock = MOCK_STRATEGIES.find(s => s.id === id);
+  if (mock) {
+    mock.live_verified = false;
+    mock.live_record_count = 0;
+  }
   res.json({ success: true, strategy: mock || null, is_mock: true });
 });
 
@@ -2011,13 +2025,43 @@ app.get('/api/marketplace/leaderboard', (req, res) => {
 });
 
 /**
- * 重新计算策略等级（内部接口）
+ * 重新计算策略等级（内部接口，连接 broker_holdings 实盘数据）
  */
-app.post('/api/marketplace/strategies/:id/recalculate-grade', (req, res) => {
-  const strategy = MOCK_STRATEGIES.find(s => s.id === req.params.id);
-  if (!strategy) return res.status(404).json({ success: false, error: '策略不存在' });
-  const grade = calculateGrade(strategy, strategy.live_metrics);
-  res.json({ success: true, id: req.params.id, old_grade: strategy.grade, new_grade: grade });
+app.post('/api/marketplace/strategies/:id/recalculate-grade', async (req, res) => {
+  try {
+    // 优先从数据库查询
+    const row = db.db && db.db.prepare('SELECT * FROM strategies WHERE id = ?').get(req.params.id);
+    const strategy = row || MOCK_STRATEGIES.find(s => s.id === req.params.id);
+    if (!strategy) return res.status(404).json({ success: false, error: '策略不存在' });
+
+    const parsedStrategy = {
+      ...strategy,
+      backtest_metrics: typeof strategy.backtest_metrics === 'string' ? JSON.parse(strategy.backtest_metrics || '{}') : strategy.backtest_metrics,
+      live_metrics: typeof strategy.live_metrics === 'string' ? JSON.parse(strategy.live_metrics || '{}') : strategy.live_metrics,
+    };
+
+    const { grade, liveVerified, liveRecordCount, liveAvgReturn } = await calculateGradeWithLive(
+      parsedStrategy, parsedStrategy.live_metrics, db.db
+    );
+
+    // 写回数据库（若存在）
+    if (row && db.db) {
+      db.db.prepare('UPDATE strategies SET grade = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(grade, req.params.id);
+    }
+
+    res.json({
+      success: true,
+      id: req.params.id,
+      old_grade: strategy.grade,
+      new_grade: grade,
+      live_verified: liveVerified,
+      live_record_count: liveRecordCount,
+      live_avg_return: liveAvgReturn,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // =============================================
