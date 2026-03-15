@@ -88,6 +88,10 @@ class Database {
       )
     `);
 
+    // Migration: 为旧版 token_usage 表添加 user_id 列（若已存在则忽略）
+    // 确保所有历史数据库都具备用户隔离能力
+    this.db.run(`ALTER TABLE token_usage ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'default-user'`, () => {});
+
     // 持仓表（M6: 新增 user_id 字段实现数据隔离）
     this.db.run(`
       CREATE TABLE IF NOT EXISTS holdings (
