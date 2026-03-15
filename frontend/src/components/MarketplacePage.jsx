@@ -434,9 +434,43 @@ function MarketplacePage({ user }) {
         <h1 className="mp-title">🏛 策略广场</h1>
         <div className="mp-header-actions">
           {isLoggedIn && (
-            <button className="mp-btn-publish-entry" onClick={() => setShowPublish(true)}>
-              + 发布策略
-            </button>
+            <>
+              {/* 申请上架入口：触发30天模拟盘验证流程 */}
+              <button
+                className="mp-btn-publish-entry"
+                style={{ marginRight: 8, background: 'linear-gradient(135deg, #f5222d, #fa8c16)', color: '#fff' }}
+                onClick={() => {
+                  // 跳转到模拟盘验证启动页，或弹出选择资金档位的对话框
+                  const capital = window.prompt(
+                    '申请上架需完成30天模拟盘验证\n请选择初始资金档位（输入数字）：\n1 → 10万元\n2 → 50万元\n3 → 200万元',
+                    '1'
+                  );
+                  if (!capital) return;
+                  const capitalMap = { '1': 100000, '2': 500000, '3': 2000000 };
+                  const initialCapital = capitalMap[capital.trim()];
+                  if (!initialCapital) { alert('无效选项，请输入 1/2/3'); return; }
+                  // TODO: 替换为当前策略ID（从策略发布流程中获取）
+                  const strategyId = window.prompt('请输入您要上架的策略ID：');
+                  if (!strategyId) return;
+                  fetch('/api/sim/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ strategyId, initialCapital }),
+                  }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                      alert(`✅ 模拟盘已启动！\nSession ID: ${data.data.sessionId}\n30个交易日后自动评测，请耐心等待。`);
+                    } else {
+                      alert(`❌ 启动失败：${data.message}`);
+                    }
+                  }).catch(err => alert(`请求失败：${err.message}`));
+                }}
+              >
+                🚀 申请上架
+              </button>
+              <button className="mp-btn-publish-entry" onClick={() => setShowPublish(true)}>
+                + 发布策略
+              </button>
+            </>
           )}
           <button
             className={`mp-tab-btn ${activeTab === 'mine' ? 'active' : ''}`}
