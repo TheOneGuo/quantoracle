@@ -1324,42 +1324,124 @@ app.post('/api/usage/add', authOptional, async (req, res) => {
  * 获取用户用量汇总（前端用量面板专用）
  * @route GET /api/usage/summary
  * @middleware authOptional - 可选认证，兼容未登录用户
- * @returns {Object} 包含余额、今日/总消耗、Top功能、模型分布的汇总数据
+ * @returns {Object} 包含余额、今日/总消耗、Top功能、模型分布、日趋势、成本估算的完整汇总数据
  */
+
+/**
+ * 主要模型单价表（USD / 1K tokens，输入+输出平均估算）
+ * 数据来源：OpenRouter 官网定价页面（定期人工维护）
+ */
+const MODEL_PRICE_PER_1K = {
+  // StepFun / 免费模型
+  'stepfun/step-3.5-flash:free':          0,
+  'google/gemini-flash-1.5:free':          0,
+  'meta-llama/llama-3.1-8b-instruct:free': 0,
+  // Claude 系列
+  'anthropic/claude-3-haiku':              0.00025,
+  'anthropic/claude-3-sonnet':             0.003,
+  'anthropic/claude-3-opus':               0.015,
+  'anthropic/claude-3.5-sonnet':           0.003,
+  // GPT 系列
+  'openai/gpt-3.5-turbo':                  0.001,
+  'openai/gpt-4o-mini':                    0.00015,
+  'openai/gpt-4o':                         0.005,
+  'openai/gpt-4-turbo':                    0.01,
+  // Gemini 系列
+  'google/gemini-pro':                     0.00125,
+  'google/gemini-1.5-pro':                 0.00125,
+  // Mistral 系列
+  'mistralai/mixtral-8x7b-instruct':       0.00027,
+  'mistralai/mistral-large':               0.002,
+  // 默认兜底
+  '_default':                              0.001,
+};
+
+/**
+ * 根据模型ID估算成本（USD）
+ * @param {string} modelId
+ * @param {number} tokens
+ * @returns {number}
+ */
+function estimateCost(modelId, tokens) {
+  const priceKey = Object.keys(MODEL_PRICE_PER_1K).find(k => modelId && modelId.includes(k.split(':')[0]))
+    || '_default';
+  return (tokens / 1000) * MODEL_PRICE_PER_1K[priceKey];
+}
+
 app.get('/api/usage/summary', authOptional, async (req, res) => {
     try {
         const userId = req.user?.id || req.query.user_id || DEFAULT_USER_ID;
 
-        // 并行获取余额和近30天统计
-        const [balanceInfo, statsAll, statsToday] = await Promise.all([
+        // 并行获取余额、近30天统计、近7天统计、今日统计
+        const [balanceInfo, statsAll, stats7d, statsToday] = await Promise.all([
             db.getUserTokenBalance(userId),
             db.getTokenUsageStats(userId, 30),
-            db.getTokenUsageStats(userId, 1)
+            db.getTokenUsageStats(userId, 7),
+            db.getTokenUsageStats(userId, 1),
         ]);
 
-        // 今日消耗
+        // ── 今日消耗 ──────────────────────────────────────────────────────
         const today_consumed = statsToday.reduce((sum, s) => sum + (s.total_tokens || 0), 0);
-        // 总消耗（30天内）
+        // ── 总消耗（账户累计） ────────────────────────────────────────────
         const total_consumed = balanceInfo.consumed_total || 0;
 
-        // Top3 功能（按token消耗降序）
-        const featureMap = {};
-        statsAll.forEach(s => {
-            featureMap[s.function_name] = (featureMap[s.function_name] || 0) + (s.total_tokens || 0);
-        });
-        const top_features = Object.entries(featureMap)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([name, tokens]) => ({ name, tokens }));
-
-        // 模型分布
+        // ── 1. 模型分布（按token消耗降序） ───────────────────────────────
         const modelMap = {};
+        const modelCallMap = {};
         statsAll.forEach(s => {
-            modelMap[s.model_id] = (modelMap[s.model_id] || 0) + (s.total_tokens || 0);
+            const k = s.model_id || 'unknown';
+            modelMap[k]     = (modelMap[k] || 0) + (s.total_tokens || 0);
+            modelCallMap[k] = (modelCallMap[k] || 0) + (s.request_count || 1);
         });
         const model_breakdown = Object.entries(modelMap)
             .sort((a, b) => b[1] - a[1])
-            .map(([model_id, tokens]) => ({ model_id, tokens }));
+            .map(([model_id, tokens]) => ({
+                model_id,
+                tokens,
+                call_count: modelCallMap[model_id] || 0,
+                estimated_cost_usd: parseFloat(estimateCost(model_id, tokens).toFixed(6)),
+            }));
+
+        // ── 2. 功能分布（按token消耗降序） ──────────────────────────────
+        const featureMap = {};
+        const featureCallMap = {};
+        statsAll.forEach(s => {
+            const k = s.function_name || 'unknown';
+            featureMap[k]     = (featureMap[k] || 0) + (s.total_tokens || 0);
+            featureCallMap[k] = (featureCallMap[k] || 0) + (s.request_count || 1);
+        });
+        const feature_breakdown = Object.entries(featureMap)
+            .sort((a, b) => b[1] - a[1])
+            .map(([feature, tokens]) => ({
+                feature,
+                tokens,
+                call_count: featureCallMap[feature] || 0,
+            }));
+
+        // ── 3. Top3 功能 ─────────────────────────────────────────────────
+        const top_features = feature_breakdown.slice(0, 3).map(({ feature, tokens }) => ({
+            name: feature,
+            tokens,
+        }));
+
+        // ── 4. 日趋势（近7天每日token消耗） ──────────────────────────────
+        const dailyMap = {};
+        // 初始化最近7天（确保无数据日期也展示0）
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            dailyMap[key] = 0;
+        }
+        stats7d.forEach(s => {
+            if (s.date && dailyMap[s.date] !== undefined) {
+                dailyMap[s.date] += (s.total_tokens || 0);
+            }
+        });
+        const daily_trend = Object.entries(dailyMap).map(([date, tokens]) => ({ date, tokens }));
+
+        // ── 5. 成本估算（30天总估算） ─────────────────────────────────────
+        const total_cost_usd = model_breakdown.reduce((s, m) => s + m.estimated_cost_usd, 0);
 
         res.json({
             success: true,
@@ -1367,8 +1449,17 @@ app.get('/api/usage/summary', authOptional, async (req, res) => {
             token_balance: balanceInfo.balance,
             total_consumed,
             today_consumed,
+            // 1. 模型分布
+            model_breakdown,
+            // 2. 功能分布
+            feature_breakdown,
+            // 3. Top3 功能
             top_features,
-            model_breakdown
+            // 4. 日趋势（近7天）
+            daily_trend,
+            // 5. 成本估算
+            estimated_cost_usd_30d: parseFloat(total_cost_usd.toFixed(6)),
+            cost_note: '成本估算基于OpenRouter公开定价，仅供参考',
         });
     } catch (error) {
         console.error('获取用量汇总失败:', error);
