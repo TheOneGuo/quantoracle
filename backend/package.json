@@ -5,10 +5,12 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "prestart": "echo '提示：生产环境请先运行 npm run build:core 生成混淆版本'",
+    "build:core": "node scripts/obfuscate-core.js",
+    "start:prod": "node -e \"require('./scripts/obfuscate-core'); setTimeout(() => require('./src/index'), 500)\""
   },
   "dependencies": {
-    "multer": "^1.4.5-lts.1",
     "axios": "^1.6.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
@@ -16,11 +18,13 @@
     "express": "^4.18.2",
     "iconv-lite": "^0.7.2",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "sqlite3": "^5.1.6",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "javascript-obfuscator": "^5.3.0",
     "nodemon": "^3.0.1"
   }
 }
