@@ -25,6 +25,9 @@ class NewsPoller {
     this._running = false;
     // 每个来源的 Bot API update offset（内存级）
     this._offsets = {};
+    // 健康检查状态
+    this._lastPollTime = null;
+    this._totalSaved = 0;
   }
 
   // ─────────────────────────────────────────────────────
@@ -63,6 +66,21 @@ class NewsPoller {
     }
   }
 
+  /**
+   * 返回当前运行状态（供健康检查接口使用）
+   * @returns {{running: boolean, last_poll_time: string|null, total_saved: number, sources_count: number}}
+   */
+  getStatus() {
+    const sources = loadNewsSources();
+    return {
+      poller_running: this._cronTask !== null,
+      last_poll_time: this._lastPollTime,
+      total_saved_session: this._totalSaved,
+      sources_count: sources.length,
+      is_polling: this._running,
+    };
+  }
+
   // ─────────────────────────────────────────────────────
   // 单次拉取全部来源
   // ─────────────────────────────────────────────────────
@@ -85,6 +103,9 @@ class NewsPoller {
       }
     }
     console.log(`[NewsPoller] 本轮完成，共入库 ${totalSaved} 条`);
+    // 更新健康检查状态
+    this._lastPollTime = new Date().toISOString();
+    this._totalSaved += totalSaved;
     return { total: totalSaved, sources: sources.length };
   }
 

@@ -2461,6 +2461,50 @@ if (process.env.TG_BOT_TOKEN || process.env.NEWS_SRC_001) {
 }
 
 /**
+ * 新闻服务健康检查接口
+ * @route GET /api/news/health
+ * @returns {{poller_running, last_poll_time, total_news_count, sources_count, rsshub_status}}
+ */
+app.get('/api/news/health', async (req, res) => {
+  try {
+    // 获取 NewsPoller 状态
+    const pollerStatus = newsPoller.getStatus();
+
+    // 查询数据库中的新闻总条数
+    let totalNewsCount = 0;
+    try {
+      const row = db.db && db.db.prepare('SELECT COUNT(*) as cnt FROM tg_messages').get();
+      totalNewsCount = row?.cnt || 0;
+    } catch (_) {}
+
+    // 验证 RSSHub 连通性（检查 jin10light 频道）
+    let rsshubStatus = 'unknown';
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const rssResp = await fetch('http://localhost:1200/telegram/channel/jin10light', { signal: ctrl.signal });
+      clearTimeout(timer);
+      rsshubStatus = rssResp.ok ? 'ok' : `error_${rssResp.status}`;
+    } catch (e) {
+      rsshubStatus = `unreachable: ${e.message.slice(0, 60)}`;
+    }
+
+    res.json({
+      success: true,
+      poller_running: pollerStatus.poller_running,
+      last_poll_time: pollerStatus.last_poll_time,
+      total_news_count: totalNewsCount,
+      sources_count: pollerStatus.sources_count,
+      rsshub_status: rsshubStatus,
+      is_polling: pollerStatus.is_polling,
+      total_saved_session: pollerStatus.total_saved_session,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
  * 已处理新闻流（分页，按评分降序，无评分的按时间降序）
  * @route GET /api/news/feed
  * @query {number} page - 页码（默认1）
