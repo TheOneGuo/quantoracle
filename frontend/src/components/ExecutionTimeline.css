@@ -1,0 +1,123 @@
+/* ExecutionTimeline.css - 执行时间线样式 */
+
+.execution-timeline {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.timeline-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #111827;
+}
+
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-item {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+
+.timeline-item.is-miss .timeline-content {
+  background: #fffbeb;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.timeline-dot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.dot-executed    { border-color: #10b981; background: #10b981; }
+.dot-skip        { border-color: #6b7280; background: #fff; }
+.dot-no_response { border-color: #f59e0b; background: #fef3c7; }
+.dot-pending     { border-color: #3b82f6; background: #fff; }
+
+.timeline-line {
+  width: 2px;
+  flex: 1;
+  background: #e5e7eb;
+  margin-top: 4px;
+}
+
+.timeline-content {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 4px;
+}
+
+.timeline-date {
+  font-size: 13px;
+  color: #9ca3af;
+  min-width: 70px;
+}
+
+.signal-type-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.stock-code {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.stock-name {
+  font-weight: normal;
+  color: #9ca3af;
+}
+
+.status-tag {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.response-time {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.miss-counted-tag {
+  font-size: 10px;
+  background: #fef3c7;
+  color: #b45309;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #fcd34d;
+}
+
+.timeline-loading,
+.timeline-error,
+.timeline-empty {
+  padding: 30px;
+  text-align: center;
+  color: #9ca3af;
+}
+
+.timeline-error { color: #ef4444; }

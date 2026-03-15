@@ -1,0 +1,82 @@
+/* RiskDashboard.css - 风险仪表盘样式 */
+
+.risk-dashboard {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.risk-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #111827;
+}
+
+.risk-badge-main {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 14px;
+  border-radius: 20px;
+  margin-bottom: 16px;
+}
+
+.chart-container {
+  margin-bottom: 20px;
+}
+
+.chart-label {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.risk-chart-canvas {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  display: block;
+}
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.risk-metric-card {
+  background: #f9fafb;
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+
+.risk-metric-card .metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+
+.risk-metric-card .metric-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+.risk-metric-card .metric-hint {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.risk-loading,
+.risk-error {
+  padding: 30px;
+  text-align: center;
+  color: #9ca3af;
+}
+
+.risk-error { color: #ef4444; }
