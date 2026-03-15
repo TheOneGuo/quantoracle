@@ -284,10 +284,155 @@ async function renewSubscription(db, subscriberId, strategyId) {
   return { success: true, newExpiresAt };
 }
 
+/**
+ * 续费时检查是否触发终身升级弹窗
+ * 条件：连续第4次续费（consecutive_months >= 3）+ 发布者已开启终身定价 + 未曾弹出过升级弹窗
+ * @param {object} db 数据库实例
+ * @param {string} subscriberId 订阅者ID
+ * @param {number} strategyId 策略ID
+ * @returns {{ showUpgradeOffer: boolean, offerPrice: number }}
+ */
+async function checkUpgradeOffer(db, subscriberId, strategyId) {
+  return new Promise((resolve) => {
+    db.db.get(
+      `SELECT s.consecutive_months, s.upgrade_offer_shown,
+              sp.lifetime_price, sp.pricing_mode
+       FROM subscriptions s
+       LEFT JOIN strategy_pricing sp ON sp.strategy_id = s.strategy_id
+       WHERE s.subscriber_id = ? AND s.strategy_id = ?`,
+      [subscriberId, strategyId],
+      (err, row) => {
+        if (err || !row) return resolve({ showUpgradeOffer: false });
+
+        // 条件：连续月数>=3，未弹出过升级弹窗，且策略已开启终身定价
+        if (
+          row.consecutive_months >= 3 &&
+          row.upgrade_offer_shown === 0 &&
+          row.pricing_mode === 'dual' &&
+          row.lifetime_price > 0
+        ) {
+          const offerPrice = parseFloat((row.lifetime_price * 0.6).toFixed(2));
+          resolve({ showUpgradeOffer: true, offerPrice, lifetimePrice: row.lifetime_price });
+        } else {
+          resolve({ showUpgradeOffer: false });
+        }
+      }
+    );
+  });
+}
+
+/**
+ * 用户接受终身升级
+ * 将月订阅转换为终身订阅，计算差价
+ * @param {object} db 数据库实例
+ * @param {string} subscriberId 订阅者ID
+ * @param {number} strategyId 策略ID
+ * @returns {{ success: boolean, upgradeCost: number, error?: string }}
+ */
+async function acceptLifetimeUpgrade(db, subscriberId, strategyId) {
+  const { recordIncome } = require('./publisher-ledger');
+
+  return new Promise((resolve, reject) => {
+    // 1. 查询当前月价和终身价
+    db.db.get(
+      `SELECT s.id as sub_id, s.price_paid, sp.lifetime_price, sp.pricing_mode,
+              st.publisher_id
+       FROM subscriptions s
+       LEFT JOIN strategy_pricing sp ON sp.strategy_id = s.strategy_id
+       LEFT JOIN strategies st ON st.id = s.strategy_id
+       WHERE s.subscriber_id = ? AND s.strategy_id = ?`,
+      [subscriberId, strategyId],
+      async (err, row) => {
+        if (err) return reject(err);
+        if (!row || !row.lifetime_price) {
+          return resolve({ success: false, error: '该策略未开启终身定价' });
+        }
+
+        // 2. 优惠价 = 终身价 × 0.6
+        const offerPrice = parseFloat((row.lifetime_price * 0.6).toFixed(2));
+
+        // 3. 差价 = 优惠价 - 当月已付月费（抵扣）
+        const upgradeCost = Math.max(0, parseFloat((offerPrice - row.price_paid).toFixed(2)));
+
+        try {
+          // 4. 更新订阅：转为终身订阅
+          await new Promise((res, rej) => {
+            db.db.run(
+              `UPDATE subscriptions
+               SET sub_type = 'lifetime', expires_at = NULL,
+                   upgrade_offer_accepted = 1, upgrade_offer_shown = 1,
+                   price_paid = price_paid + ?
+               WHERE subscriber_id = ? AND strategy_id = ?`,
+              [upgradeCost, subscriberId, strategyId],
+              (e) => e ? rej(e) : res()
+            );
+          });
+
+          // 5. 如有差价，记录发布者收入
+          if (upgradeCost > 0 && row.publisher_id) {
+            await recordIncome(db, row.publisher_id, row.sub_id, upgradeCost, 0.10);
+          }
+
+          resolve({ success: true, upgradeCost, offerPrice });
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * 续费处理（月订阅），同时更新连续月数并检查升级弹窗
+ * @param {object} db 数据库实例
+ * @param {string} subscriberId 订阅者ID
+ * @param {number} strategyId 策略ID
+ * @returns {{ renewed: boolean, upgradeOffer: object }}
+ */
+async function renewAndCheckUpgrade(db, subscriberId, strategyId) {
+  // 1. 执行续费（更新 expires_at + 30天，grace_end_at，signal_push_enabled）
+  const renewResult = await renewSubscription(db, subscriberId, strategyId);
+  if (!renewResult.success) {
+    return { renewed: false, error: renewResult.error };
+  }
+
+  // 2. consecutive_months += 1（连续订阅月数累加）
+  await new Promise((resolve, reject) => {
+    db.db.run(
+      `UPDATE subscriptions
+       SET consecutive_months = consecutive_months + 1
+       WHERE subscriber_id = ? AND strategy_id = ?`,
+      [subscriberId, strategyId],
+      (err) => err ? reject(err) : resolve()
+    );
+  });
+
+  // 3. 检查是否触发升级弹窗
+  const upgradeOffer = await checkUpgradeOffer(db, subscriberId, strategyId);
+
+  // 如果触发升级弹窗，标记已弹出（避免重复弹出）
+  if (upgradeOffer.showUpgradeOffer) {
+    await new Promise((resolve, reject) => {
+      db.db.run(
+        `UPDATE subscriptions SET upgrade_offer_shown = 1
+         WHERE subscriber_id = ? AND strategy_id = ?`,
+        [subscriberId, strategyId],
+        (err) => err ? reject(err) : resolve()
+      );
+    });
+  }
+
+  // 4. 返回续费结果和升级弹窗信息
+  return { renewed: true, newExpiresAt: renewResult.newExpiresAt, upgradeOffer };
+}
+
 module.exports = {
   processExpiredSubscriptions,
   checkSubscriptionActive,
   setLifetimePricing,
   renewSubscription,
+  checkUpgradeOffer,
+  acceptLifetimeUpgrade,
+  renewAndCheckUpgrade,
   GRACE_PERIOD_DAYS,
 };
