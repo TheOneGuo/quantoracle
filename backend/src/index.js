@@ -2993,6 +2993,85 @@ cron.schedule('1 0 1 * *', async () => {
     }
 
     console.log(`[M3-SettleCron] 月度结算完成，共处理 ${publishers.length} 位发布者`);
+
+    // =========================================================
+    // M4 扩展：策略执行统计汇总 & 状态更新
+    // =========================================================
+    console.log('[M4-StatsCron] 开始计算策略执行统计...');
+    try {
+      // 查询上月所有策略（有信号记录的）
+      const strategiesWithSignals = await db.all(`
+        SELECT DISTINCT strategy_id FROM signals WHERE strftime('%Y-%m', scheduled_date) = ?
+      `, [lastMonth]);
+
+      for (const { strategy_id } of strategiesWithSignals) {
+        try {
+          // 统计上月：总持仓操作信号数、已响应数、未响应数
+          const stats = await db.get(`
+            SELECT
+              COUNT(*) AS total_position_signals,
+              SUM(CASE WHEN confirm_status IN ('executed','skip') THEN 1 ELSE 0 END) AS responded_count,
+              SUM(CASE WHEN confirm_status = 'no_response' THEN 1 ELSE 0 END) AS no_response_count
+            FROM signals
+            WHERE strategy_id = ? AND strftime('%Y-%m', scheduled_date) = ?
+              AND signal_type IN ('buy','sell','add','reduce','stop_loss')
+          `, [strategy_id, lastMonth]);
+
+          const total    = stats?.total_position_signals || 0;
+          const responded = stats?.responded_count || 0;
+          const missed   = stats?.no_response_count || 0;
+          const missRate = total > 0 ? missed / total : 0;
+
+          // 根据累计未响应次数（含历史）判断状态
+          const cumStats = await db.get(`
+            SELECT COALESCE(SUM(no_response_count), 0) AS cum_miss
+            FROM strategy_miss_stats WHERE strategy_id = ?
+          `, [strategy_id]);
+          const cumMiss = (cumStats?.cum_miss || 0) + missed;
+
+          let statusImpact = 'normal';
+          if (cumMiss >= 10) {
+            statusImpact = 'suspended';
+          } else if (cumMiss >= 7) {
+            statusImpact = 'warning_orange';
+          } else if (cumMiss >= 4) {
+            statusImpact = 'warning_yellow';
+          }
+
+          // 写入 strategy_miss_stats
+          await db.run(`
+            INSERT INTO strategy_miss_stats
+              (strategy_id, stat_month, total_position_signals, no_response_count, miss_rate, status_impact)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(strategy_id, stat_month) DO UPDATE SET
+              total_position_signals = excluded.total_position_signals,
+              no_response_count = excluded.no_response_count,
+              miss_rate = excluded.miss_rate,
+              status_impact = excluded.status_impact
+          `, [strategy_id, lastMonth, total, missed, missRate, statusImpact]);
+
+          // 更新策略状态（suspended 则关闭新增订阅入口）
+          if (statusImpact === 'suspended') {
+            await db.run(`
+              UPDATE strategies SET status = 'suspended' WHERE id = ?
+            `, [strategy_id]);
+            console.log(`[M4-StatsCron] 策略 ${strategy_id} 累计未响应≥10次，已暂停新订阅`);
+          } else if (statusImpact !== 'normal') {
+            // warning 状态写入策略扩展字段（不关闭入口，仅展示警示）
+            await db.run(`
+              UPDATE strategies SET warning_level = ? WHERE id = ?
+            `, [statusImpact, strategy_id]);
+          }
+
+          console.log(`[M4-StatsCron] 策略 ${strategy_id} ${lastMonth} 统计：总信号${total} 已响应${responded} 未响应${missed} 响应率${((1-missRate)*100).toFixed(1)}% 状态:${statusImpact}`);
+        } catch (e) {
+          console.error(`[M4-StatsCron] 策略 ${strategy_id} 统计失败:`, e.message);
+        }
+      }
+      console.log(`[M4-StatsCron] 策略执行统计完成，共处理 ${strategiesWithSignals.length} 个策略`);
+    } catch (e) {
+      console.error('[M4-StatsCron] 策略执行统计出错:', e.message);
+    }
   } catch (err) {
     console.error('[M3-SettleCron] 月度结算任务出错:', err.message);
   }
