@@ -305,20 +305,8 @@ class Database {
       )
     `);
 
-    // 策略评价表
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS strategy_reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        strategy_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-        comment TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(strategy_id, user_id),
-        FOREIGN KEY (strategy_id) REFERENCES strategies(id),
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      )
-    `);
+    // 策略评价表（旧版简单字段，已由 M3 新版 strategy_reviews 替代，此处保留迁移兼容性）
+    // 注意：M3 版本的完整 strategy_reviews 表定义在 initDb 后半部分
 
     // =====================
     // 新闻管道表（Telegram抓取）
@@ -795,6 +783,68 @@ class Database {
     `);
 
     // 建立索引提升查询效率
+
+    // ============================================================
+    // 补充缺失的辅助表（API 层实际使用，db 初始化时创建）
+    // ============================================================
+
+    // 每日持仓快照（供风险仪表盘、策略广场使用）
+    // 每日收盘后（15:05）由策略引擎写入
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS position_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id TEXT NOT NULL,
+        snapshot_date DATE NOT NULL,
+        cash_usage_rate REAL NOT NULL,  -- 资金使用率（0-1浮点数）
+        total_assets REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(strategy_id, snapshot_date)
+      )
+    `);
+
+    // 策略月度收益表（供策略广场列表排序使用）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_monthly_returns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id TEXT NOT NULL,
+        stat_month TEXT NOT NULL,       -- 格式 YYYY-MM
+        monthly_return REAL NOT NULL,   -- 月度收益率（小数，如 0.05 表示 5%）
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(strategy_id, stat_month)
+      )
+    `);
+
+    // 发布者信用评级缓存表（策略广场列表查询加速用）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_credit_cache (
+        publisher_id TEXT PRIMARY KEY,
+        grade TEXT NOT NULL DEFAULT 'B',  -- 信用评级字母
+        score REAL NOT NULL DEFAULT 50,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 用户持仓信号表（策略信号推送后，订阅者的持仓操作记录）
+    // 注意：本表与 strategy_signals 共用信号源，作为订阅者侧的执行视图
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS signals (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        subscriber_id TEXT,             -- 信号接收的订阅者ID（NULL=广播到所有订阅者）
+        stock_code TEXT NOT NULL,
+        stock_name TEXT,
+        signal_type TEXT NOT NULL,      -- buy/sell/add/reduce/stop_loss
+        scheduled_date DATE NOT NULL,   -- 计划执行日期
+        confirm_status TEXT DEFAULT 'pending',  -- executed/skip/no_response/pending
+        confirm_time DATETIME,          -- 订阅者响应时间
+        is_miss_counted INTEGER DEFAULT 0,      -- 是否计入未响应次数
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id, scheduled_date)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_position_snapshots ON position_snapshots(strategy_id, snapshot_date)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_strategy_monthly_returns ON strategy_monthly_returns(strategy_id, stat_month)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_strategy ON sim_trading_sessions(strategy_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON sim_trading_sessions(user_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_signals_session ON sim_signals(session_id)`);

@@ -16,6 +16,7 @@
 
 const express = require('express');
 const router = express.Router();
+const db = require('../db');  // 统一使用 db 模块，与其他 API 文件一致
 const { calcAndSaveRating, checkPublishQuota } = require('../services/publisher-rating');
 
 /**
@@ -39,7 +40,7 @@ function requirePublisher(req, res, next) {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/publisher/my-rating', requirePublisher, async (req, res) => {
   try {
-    const db = req.app.locals.db;
+
 
     // 实时重算（或从缓存取，视业务需求）
     const result = await calcAndSaveRating(db, req.publisherId);
@@ -80,7 +81,7 @@ router.get('/publisher/my-rating', requirePublisher, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/publisher/publish-quota', requirePublisher, async (req, res) => {
   try {
-    const db = req.app.locals.db;
+
     const quota = await checkPublishQuota(db, req.publisherId);
 
     res.json({
@@ -100,30 +101,24 @@ router.get('/publisher/publish-quota', requirePublisher, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/marketplace/:id/publisher-badge', async (req, res) => {
   try {
-    const db = req.app.locals.db;
+
     const strategyId = req.params.id;
 
     // 查找策略的发布者
-    const strategy = await new Promise((resolve, reject) => {
-      db.db.get(
-        `SELECT publisher_id FROM strategies WHERE id = ?`,
-        [strategyId],
-        (err, row) => err ? reject(err) : resolve(row)
-      );
-    });
+    const strategy = await db.get(
+      `SELECT publisher_id FROM strategies WHERE id = ?`,
+      [strategyId]
+    );
 
     if (!strategy) {
       return res.status(404).json({ error: '策略不存在' });
     }
 
     // 查询发布者评级（只返回徽章级别，不返回分数）
-    const rating = await new Promise((resolve, reject) => {
-      db.db.get(
-        `SELECT grade, calculated_at FROM publisher_ratings WHERE publisher_id = ?`,
-        [strategy.publisher_id],
-        (err, row) => err ? reject(err) : resolve(row)
-      );
-    });
+    const rating = await db.get(
+      `SELECT grade, calculated_at FROM publisher_ratings WHERE publisher_id = ?`,
+      [strategy.publisher_id]
+    );
 
     // 评级徽章颜色配置（供前端渲染）
     const badgeColors = {

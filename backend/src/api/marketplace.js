@@ -266,12 +266,12 @@ router.get('/strategies/:id', async (req, res) => {
       SELECT
         r.id,
         r.rating,
-        r.comment,
+        r.review_text AS comment,
         r.created_at,
-        r.net_assessment,      -- positive/negative
+        r.rating AS net_assessment,      -- good/bad（策略广场使用 good/bad）
         u.nickname AS reviewer_name
       FROM strategy_reviews r
-      LEFT JOIN users u ON r.reviewer_id = u.id
+      LEFT JOIN users u ON r.user_id = u.id
       WHERE r.strategy_id = ? AND r.ai_audit_status = 'approved'
       ORDER BY r.created_at DESC
       LIMIT 20

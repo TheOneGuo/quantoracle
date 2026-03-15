@@ -136,9 +136,16 @@ app.use('/api/broker', authRequired, brokerVideoRoutes);
 
 // M2：策略规则引擎路由
 const strategyRulesRouter = require('./api/strategy-rules');
+// M4 新增 API 路由
+const executionHistoryRouter = require('./api/execution-history');
+const marketplaceRouter      = require('./api/marketplace');
+const publisherRatingRouter  = require('./api/publisher-rating');
 // 将 db 实例挂到 app 供路由使用
 app.set('db', db.db);
 app.use('/api/strategy', strategyRulesRouter);
+app.use('/api', executionHistoryRouter);
+app.use('/api/marketplace', marketplaceRouter);
+app.use('/api', publisherRatingRouter);
 
 /**
  * 计算持仓汇总信息
