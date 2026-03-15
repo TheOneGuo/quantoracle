@@ -697,6 +697,85 @@ class Database {
       )
     `);
 
+    // ============================================================
+    // M3 新增表：定价历史、评价、结算、审计日志
+    // ============================================================
+
+    // 策略定价历史表：记录每次定价变更（AI初始定价/AI涨降价/手动调价）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_pricing (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id TEXT NOT NULL,
+        price_monthly REAL NOT NULL,
+        price_annual REAL NOT NULL,
+        price_per_signal REAL,
+        change_reason TEXT NOT NULL,  -- ai_initial/ai_up/ai_down/manual
+        change_pct REAL,              -- 调价幅度百分比
+        trigger_count INTEGER,        -- 触发本次调价的净评价数
+        comparison_scores TEXT,       -- 4维横向对比评分JSON
+        effective_from DATE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 用户评价表：存储订阅者对策略的好评/差评及视频证明
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_reviews (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        rating TEXT NOT NULL,                      -- good/bad
+        review_text TEXT,                          -- Markdown，限1000字
+        video_url TEXT,                            -- 评价视频URL
+        ai_audit_status TEXT DEFAULT 'pending',    -- pending/approved/rejected
+        ai_audit_result TEXT,                      -- AI审核结论
+        ai_audit_reason TEXT,                      -- AI审核原因说明
+        is_counted INTEGER DEFAULT 0,              -- 是否计入净评价统计
+        refund_paid INTEGER DEFAULT 0,             -- 发布者是否已支付返现
+        refund_amount REAL,                        -- 返现金额
+        refund_paid_at DATETIME,                   -- 支付时间
+        user_received INTEGER DEFAULT 0,           -- 用户是否已收到返现
+        user_received_at DATETIME,
+        subscription_month TEXT NOT NULL,          -- 评价对应的订阅月份 YYYY-MM
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(strategy_id, user_id, subscription_month)
+      )
+    `);
+
+    // 发布者收入结算表：每月结算发布者的净收入
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_settlements (
+        id TEXT PRIMARY KEY,
+        publisher_id TEXT NOT NULL,
+        settlement_month TEXT NOT NULL,       -- 结算月份 YYYY-MM
+        gross_revenue REAL NOT NULL,          -- 月度总收入（含所有订阅费）
+        review_refunds REAL DEFAULT 0,        -- 差评返现总额
+        platform_commission REAL NOT NULL,    -- 平台抽成金额
+        commission_rate REAL NOT NULL,        -- 抽成比例（小数）
+        net_payout REAL NOT NULL,             -- 实际打款金额
+        status TEXT DEFAULT 'pending',        -- pending/paid/frozen
+        frozen_reason TEXT,                   -- 冻结原因（如纠纷）
+        paid_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(publisher_id, settlement_month)
+      )
+    `);
+
+    // 意外事件审计日志：记录系统异常、推送失败、数据错误等事件
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS incident_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_type TEXT NOT NULL,          -- halt/suspend/data_error/push_failure
+        affected_strategy_id TEXT,
+        affected_signal_id TEXT,
+        description TEXT NOT NULL,
+        auto_handled INTEGER DEFAULT 1,       -- 1=系统自动处理，0=需人工介入
+        resolution TEXT,                      -- 处理结果说明
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // 建立索引提升查询效率
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_strategy ON sim_trading_sessions(strategy_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON sim_trading_sessions(user_id)`);
