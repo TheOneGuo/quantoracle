@@ -738,17 +738,39 @@ app.get('/api/capital-flow/:code', async (req, res) => {
 });
 
 /**
- * 获取个股筹码分布数据
- * 通过东方财富获筹码分布（成本分布）
+ * 获取个股筹码分布数据（真实价位分布）
+ * 优先调用 AkShare Python 微服务（:8767/cyq），获取真实价位筹码占比
+ * 若 AkShare 接口超时（>5s），降级为东方财富汇总数据并标注 is_simulated: true
  * @route GET /api/chip-distribution/:code
  */
 app.get('/api/chip-distribution/:code', async (req, res) => {
+  const { code } = req.params;
+  const pureCode = code.replace(/^(sh|sz)/i, '');
+  const adjust = req.query.adjust || 'hfq';
+
+  // 1. 优先调用 AkShare Python 微服务获取真实价位筹码分布
   try {
-    const { code } = req.params;
-    const pureCode = code.replace(/^(sh|sz)/i, '');
+    const akUrl = `${NEWS_SERVICE_URL}/cyq?code=${pureCode}&adjust=${adjust}`;
+    const akResp = await axios.get(akUrl, { timeout: 5000 });
+    if (akResp.data && akResp.data.success && akResp.data.data && akResp.data.data.length > 0) {
+      return res.json({
+        success: true,
+        data: {
+          code,
+          distribution: akResp.data.data,  // [{price, percent, profit}, ...]
+          source: 'AkShare stock_cyq_em',
+          is_simulated: false,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  } catch (akErr) {
+    console.warn('[/api/chip-distribution] AkShare 超时或失败，降级到东方财富:', akErr.message);
+  }
+
+  // 2. 降级：调用东方财富汇总数据（仅含平均成本/获利比例等汇总指标）
+  try {
     const market = code.startsWith('sh') ? '1' : '0';
-    
-    // 东方财富筹码分布接口
     const url = `https://push2.eastmoney.com/api/qt/stock/cyq/get?secid=${market}.${pureCode}&fields=f61,f62,f63,f64,f65`;
     
     const resp = await axios.get(url, {
@@ -771,7 +793,8 @@ app.get('/api/chip-distribution/:code', async (req, res) => {
         main_cost: d.f64 !== null && d.f64 !== undefined ? parseFloat((d.f64 / 100).toFixed(2)) : null,
         // 散户成本
         retail_cost: d.f65 !== null && d.f65 !== undefined ? parseFloat((d.f65 / 100).toFixed(2)) : null,
-        source: '东方财富',
+        source: '东方财富（汇总）',
+        is_simulated: true,  // 无真实价位分布，仅有汇总指标
         timestamp: new Date().toISOString()
       };
       return res.json({ success: true, data: chipData });
