@@ -577,6 +577,126 @@ class Database {
       )
     `);
 
+    // ===================== M2：策略规则引擎相关表 =====================
+
+    // 策略规则版本表（每次修改核心参数即新建版本）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_rules (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        is_active INTEGER DEFAULT 1,
+        -- 选股维度权重 JSON: {technical:40, fundamental:30, sentiment:10, capital:10, chip:10}
+        dimension_weights TEXT NOT NULL,
+        -- 各维度规则 JSON
+        technical_rules TEXT NOT NULL,
+        fundamental_rules TEXT,
+        sentiment_rules TEXT,
+        capital_rules TEXT,
+        chip_rules TEXT,
+        -- 评级阈值（满分100分的分段线）
+        grade_s_threshold REAL DEFAULT 90,
+        grade_a_threshold REAL DEFAULT 75,
+        grade_b_threshold REAL DEFAULT 60,
+        grade_c_threshold REAL DEFAULT 45,
+        -- 资金使用规则 JSON: {s_open:20, a_open:15, b_open:10, c_open:5, s_add:15, a_add:10, b_add:5, max_single_pct:20, max_total_pct:80, max_add_times:2}
+        capital_allocation TEXT NOT NULL,
+        -- 减仓规则 JSON: [{trigger:'grade_s_to_a', pct:25}, ...]
+        reduce_rules TEXT NOT NULL,
+        -- 止盈规则 JSON: [{type:'fixed', trigger_pct:15, sell_pct:30}, {type:'trailing', drawdown_pct:15, sell_pct:50}]
+        take_profit_rules TEXT NOT NULL,
+        -- 止损规则 JSON: {fixed_pct:8, sell_pct:100, tech_stop:'MA60', time_stop_days:45, drawdown_stop_pct:50}
+        stop_loss_rules TEXT NOT NULL,
+        -- 触发规则 JSON: [{condition:'ma5_cross_ma20_up', signal:'add'}, ...]
+        trigger_rules TEXT NOT NULL,
+        -- 推送渠道 JSON: [{type:'telegram', webhook:'...'}, ...]
+        push_channels TEXT,
+        -- AI建议匹配的模板名（conservative/balanced/aggressive）
+        ai_template TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(strategy_id, version)
+      )
+    `);
+
+    // 信号推送记录（每条买卖信号的推送记录）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_signals (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        rule_version INTEGER NOT NULL DEFAULT 1,
+        stock_code TEXT NOT NULL,
+        stock_name TEXT,
+        -- 信号类型：buy/add/reduce/sell/stop_loss/stop_profit
+        signal_type TEXT NOT NULL,
+        grade TEXT,
+        score REAL,
+        suggested_price REAL,
+        -- 系统计算的建议数量（已按100股取整）
+        suggested_quantity INTEGER,
+        suggested_amount REAL,
+        position_pct REAL,
+        -- 可用持仓（排除T+1当日买入锁定部分）
+        available_quantity INTEGER,
+        locked_quantity INTEGER,
+        -- 价格有效性验证（是否在涨跌停范围内）
+        limit_up_price REAL,
+        limit_down_price REAL,
+        price_valid INTEGER DEFAULT 1,
+        -- 触发原因 JSON数组，如 ['ma5_cross_ma20_up', 'grade_upgrade_a_to_s']
+        trigger_reasons TEXT,
+        push_time DATETIME,
+        expires_at DATETIME,
+        -- 推送状态：pending/sent/failed/expired/cancelled
+        push_status TEXT DEFAULT 'pending',
+        -- 是否为T+1顺延信号（昨日未能执行，今日继续）
+        is_t1_followup INTEGER DEFAULT 0,
+        parent_signal_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 执行确认记录（跟踪用户是否按信号执行了操作）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS signal_executions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        -- 执行状态：executed/partial/not_executed/no_response
+        execution_status TEXT NOT NULL,
+        actual_price REAL,
+        actual_quantity INTEGER,
+        actual_amount REAL,
+        -- 数量偏差比例（实际vs建议，超过20%需要说明原因）
+        quantity_deviation_pct REAL,
+        -- 原因代码: limit_up/limit_down/t1_lock/position_limit/tech_issue/other
+        reason_code TEXT,
+        reason_text TEXT,
+        -- 收到信号到反馈的响应秒数
+        response_seconds INTEGER,
+        -- 是否计入未响应统计（影响策略评级）
+        is_counted_miss INTEGER DEFAULT 0,
+        executed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 策略未响应统计（按月统计，影响策略上架资格）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS strategy_miss_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id TEXT NOT NULL,
+        stat_month TEXT NOT NULL,
+        total_position_signals INTEGER DEFAULT 0,
+        responded_count INTEGER DEFAULT 0,
+        no_response_count INTEGER DEFAULT 0,
+        miss_rate REAL,
+        -- 状态影响：normal/warning_yellow/warning_orange/suspended
+        status_impact TEXT DEFAULT 'normal',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(strategy_id, stat_month)
+      )
+    `);
+
     // 建立索引提升查询效率
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_strategy ON sim_trading_sessions(strategy_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON sim_trading_sessions(user_id)`);
