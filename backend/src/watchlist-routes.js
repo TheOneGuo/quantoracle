@@ -4,6 +4,17 @@
  */
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
+
+// AkShare Python 微服务地址（与 index.js 保持一致）
+const NEWS_SERVICE_URL = process.env.NEWS_SERVICE_URL || 'http://localhost:8767';
+
+// 热股缓存（60秒有效，避免频繁调用 AkShare）
+let hotStocksCache = { data: null, updatedAt: 0 };
+const HOT_STOCKS_CACHE_TTL = 60 * 1000; // 60秒
+
+// 港股缓存（60秒有效）
+let hkSpotCache = { data: null, updatedAt: 0 };
 
 module.exports = function(app, db, stockAPI) {
 
@@ -61,28 +72,97 @@ module.exports = function(app, db, stockAPI) {
     }
   });
 
-  // ===== A股筛选（模拟数据，后续接 AkShare） =====
+    // ===== A股热股筛选（接入 AkShare 真实涨幅榜，60秒缓存）=====
   app.get('/api/screen/hot-stocks', async (req, res) => {
-    // 模拟筛选结果，后续可接入 AkShare python 服务
-    const mockData = [
-      { code: 'sh688256', name: '寒武纪', current: 378.5, changePercent: 8.23, pe: null, industry: 'AI芯片', reason: 'AI算力需求爆发，国产GPU龙头', marketCap: 1520 },
-      { code: 'sz002230', name: '科大讯飞', current: 42.8, changePercent: 6.15, pe: 28.3, industry: 'AI应用', reason: '大模型落地加速，教育+政务双轮驱动', marketCap: 356 },
-      { code: 'sz002371', name: '北方华创', current: 285.4, changePercent: 5.82, pe: 22.1, industry: '半导体设备', reason: '国产替代加速，刻蚀机龙头', marketCap: 442 },
-      { code: 'sh688981', name: '中芯国际', current: 68.9, changePercent: 7.43, pe: 18.7, industry: '半导体', reason: '14nm量产提速，先进制程突破', marketCap: 548 },
-      { code: 'sz300750', name: '宁德时代', current: 198.6, changePercent: 5.21, pe: 19.4, industry: '新能源', reason: '固态电池进展超预期，欧美订单回暖', marketCap: 4320 },
-      { code: 'sz002594', name: '比亚迪', current: 315.2, changePercent: 6.78, pe: 24.6, industry: '新能源车', reason: '2月销量创历史新高，海外市场扩张', marketCap: 9150 },
-      { code: 'sz300760', name: '迈瑞医疗', current: 226.4, changePercent: 5.44, pe: 27.8, industry: '医疗器械', reason: '海外市场持续扩张，设备升级周期', marketCap: 276 },
-      { code: 'sh603259', name: '药明康德', current: 58.7, changePercent: 9.12, pe: 16.3, industry: '医药CRO', reason: '全球创新药研发回暖，订单量改善', marketCap: 318 },
-      { code: 'sh600519', name: '贵州茅台', current: 1680, changePercent: 3.15, pe: 27.2, industry: '消费白酒', reason: '春节动销超预期，直销渠道占比提升', marketCap: 21120 },
-      { code: 'sz002415', name: '海康威视', current: 28.4, changePercent: 5.67, pe: 14.8, industry: 'AI安防', reason: 'AI摄像头升级换代，政府采购恢复', marketCap: 267 },
-    ];
-    // 筛选条件过滤
-    const filtered = mockData.filter(s => {
-      const peOk = !s.pe || s.pe < 30;
-      const changeOk = s.changePercent >= 3;
-      return peOk && changeOk;
-    });
-    res.json({ success: true, data: filtered, filters: { pe: 30, minChange: 3, marketCapRange: '50-500亿' }, updatedAt: new Date().toISOString() });
+    const now = Date.now();
+    
+    // 命中缓存直接返回
+    if (hotStocksCache.data && (now - hotStocksCache.updatedAt) < HOT_STOCKS_CACHE_TTL) {
+      return res.json({
+        success: true,
+        data: hotStocksCache.data,
+        cached: true,
+        updatedAt: new Date(hotStocksCache.updatedAt).toISOString()
+      });
+    }
+    
+    try {
+      // 调用 AkShare Python 微服务获取 A股实时涨幅榜
+      const resp = await axios.get(`${NEWS_SERVICE_URL}/hot-stocks?limit=20`, { timeout: 10000 });
+      if (resp.data && resp.data.success && resp.data.data) {
+        hotStocksCache = { data: resp.data.data, updatedAt: now };
+        return res.json({
+          success: true,
+          data: resp.data.data,
+          cached: false,
+          is_simulated: false,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      throw new Error('AkShare 返回空数据');
+    } catch (err) {
+      console.warn('[/api/screen/hot-stocks] AkShare 失败，降级模拟数据:', err.message);
+      
+      // 降级：返回静态模拟数据并标注 is_simulated: true
+      const mockData = [
+        { code: 'sh688256', name: '寒武纪', price: 378.5, change_pct: 8.23, pe: null, market_cap: 1520e8 },
+        { code: 'sz002230', name: '科大讯飞', price: 42.8, change_pct: 6.15, pe: 28.3, market_cap: 356e8 },
+        { code: 'sz002371', name: '北方华创', price: 285.4, change_pct: 5.82, pe: 22.1, market_cap: 442e8 },
+        { code: 'sh688981', name: '中芯国际', price: 68.9, change_pct: 7.43, pe: 18.7, market_cap: 548e8 },
+        { code: 'sz300750', name: '宁德时代', price: 198.6, change_pct: 5.21, pe: 19.4, market_cap: 4320e8 },
+        { code: 'sz002594', name: '比亚迪', price: 315.2, change_pct: 6.78, pe: 24.6, market_cap: 9150e8 },
+        { code: 'sh603259', name: '药明康德', price: 58.7, change_pct: 9.12, pe: 16.3, market_cap: 318e8 },
+        { code: 'sh600519', name: '贵州茅台', price: 1680, change_pct: 3.15, pe: 27.2, market_cap: 21120e8 },
+      ];
+      return res.json({
+        success: true,
+        data: mockData,
+        cached: false,
+        is_simulated: true,
+        error_reason: err.message,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  });
+
+  // ===== 港股实时行情（接入 AkShare stock_hk_spot_em，60秒缓存）=====
+  app.get('/api/hk/spot', async (req, res) => {
+    const now = Date.now();
+    
+    // 命中缓存直接返回
+    if (hkSpotCache.data && (now - hkSpotCache.updatedAt) < HOT_STOCKS_CACHE_TTL) {
+      return res.json({
+        success: true,
+        data: hkSpotCache.data,
+        cached: true,
+        updatedAt: new Date(hkSpotCache.updatedAt).toISOString()
+      });
+    }
+    
+    try {
+      // 调用 AkShare Python 微服务获取港股实时行情
+      const limit = req.query.limit || 100;
+      const resp = await axios.get(`${NEWS_SERVICE_URL}/hk-spot?limit=${limit}`, { timeout: 10000 });
+      if (resp.data && resp.data.success && resp.data.data) {
+        hkSpotCache = { data: resp.data.data, updatedAt: now };
+        return res.json({
+          success: true,
+          data: resp.data.data,
+          cached: false,
+          is_simulated: false,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      throw new Error('AkShare 港股数据为空');
+    } catch (err) {
+      console.error('[/api/hk/spot] 港股数据获取失败:', err.message);
+      return res.status(503).json({
+        success: false,
+        error: `港股数据获取失败: ${err.message}`,
+        is_simulated: true,
+        data: []
+      });
+    }
   });
 
 };
