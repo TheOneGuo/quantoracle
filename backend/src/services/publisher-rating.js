@@ -18,6 +18,9 @@
  *   D （<30）：3个月禁止
  */
 
+// 引入定价矩阵，用于评级变动时截断超出天花板的策略价格
+const pricingCaps = require('../config/pricing-caps');
+
 'use strict';
 
 /**
@@ -283,6 +286,15 @@ async function calcAndSaveRating(db, publisherId) {
     );
   });
 
+  // 评级保存成功后，处理评级变动对已有策略价格的影响
+  // 若新评级天花板低于当前策略价格，自动截断并退还订阅者差价
+  try {
+    await handleGradeDowngrade(db, publisherId, gradeInfo.grade);
+  } catch (e) {
+    // 价格截断失败不阻断评级保存结果，仅记录日志
+    console.error(`[publisher-rating] handleGradeDowngrade 失败: publisherId=${publisherId}`, e.message);
+  }
+
   return {
     grade: gradeInfo.grade,
     score: Math.round(totalScore * 10) / 10,
@@ -290,6 +302,8 @@ async function calcAndSaveRating(db, publisherId) {
     breakdown: { percentiles, scores, weights },
   };
 }
+
+// handleGradeDowngrade 定义于文件末尾，async function 声明在运行时已完成初始化
 
 /**
  * 检查发布者是否可以新建策略（额度检查）
@@ -411,9 +425,132 @@ async function monthlyReset(db) {
   console.log(`[publisher-rating] 月度重置完成，共处理 ${publishers.length} 位发布者`);
 }
 
+// ============================================================
+// 评级变动后价格截断处理
+// ============================================================
+
+/**
+ * 评级变动后处理：若新评级天花板低于当前策略价格，截断并退差额给订阅者
+ * 查询该发布者所有已上架策略，逐一检查价格是否超出新评级天花板
+ *
+ * @param {object} dbConn  数据库实例（支持 .all / .run）
+ * @param {string} publisherId 发布者用户ID
+ * @param {string} newGrade    新评级（S+/S/A/B/C/D）
+ * @returns {Promise<{ truncatedCount: number, strategies: Array }>}
+ */
+async function handleGradeDowngrade(dbConn, publisherId, newGrade) {
+  // 1. 查询该发布者所有已上架策略，获取 capital_tier 和当前价格
+  const strategies = await new Promise((resolve, reject) => {
+    dbConn.all(
+      `SELECT id, name, capital_tier, price_monthly
+       FROM strategies
+       WHERE publisher_id = ? AND status = 'published'`,
+      [publisherId],
+      (err, rows) => err ? reject(err) : resolve(rows || [])
+    );
+  });
+
+  const truncatedStrategies = [];
+
+  for (const strategy of strategies) {
+    // capital_tier 字段存储的是定价档次（10w/50w/200w）
+    const tier = strategy.capital_tier;
+    const currentPrice = strategy.price_monthly || 0;
+
+    // 2. 检查当前价格是否超出新评级天花板
+    const { newPrice, truncated, diff } = pricingCaps.applyGradeChange(currentPrice, newGrade, tier);
+
+    if (truncated) {
+      // 3a. 更新策略价格为截断后的新价格
+      await new Promise((resolve, reject) => {
+        dbConn.run(
+          `UPDATE strategies SET price_monthly = ?, price_yearly = ?, pricing_updated_at = datetime('now')
+           WHERE id = ?`,
+          [newPrice, newPrice * 10, strategy.id],
+          (err) => err ? reject(err) : resolve()
+        );
+      });
+
+      // 3b. 记录调价历史到 strategy_pricing 表（change_reason='grade_downgrade'）
+      await new Promise((resolve, reject) => {
+        dbConn.run(
+          `INSERT INTO strategy_pricing
+             (strategy_id, price_monthly, price_yearly, change_reason, effective_from, created_at)
+           VALUES (?, ?, ?, 'grade_downgrade', datetime('now'), datetime('now'))`,
+          [strategy.id, newPrice, newPrice * 10],
+          (err) => err ? reject(err) : resolve()
+        );
+      });
+
+      // 3c. 查询受影响的当前活跃付费订阅者（用于通知和退款）
+      const subscribers = await new Promise((resolve, reject) => {
+        dbConn.all(
+          `SELECT user_id, expires_at, price_paid
+           FROM subscriptions
+           WHERE strategy_id = ? AND status = 'active' AND price_paid > ?`,
+          [strategy.id, newPrice],
+          (err, rows) => err ? reject(err) : resolve(rows || [])
+        );
+      });
+
+      // 3d. 为受影响订阅者写入退款记录（差价退款）
+      for (const sub of subscribers) {
+        // 计算剩余天数（按比例退还差价）
+        const now = new Date();
+        const expires = new Date(sub.expires_at);
+        const totalDays = 30; // 月订阅按30天计算
+        const remainingDays = Math.max(0, Math.ceil((expires - now) / (1000 * 60 * 60 * 24)));
+        const refundAmount = Math.round((diff / totalDays) * remainingDays * 100) / 100;
+
+        if (refundAmount > 0) {
+          await new Promise((resolve, reject) => {
+            dbConn.run(
+              `INSERT INTO refund_records
+                 (user_id, strategy_id, refund_amount, refund_reason, created_at)
+               VALUES (?, ?, ?, ?, datetime('now'))`,
+              [sub.user_id, strategy.id,
+               refundAmount,
+               `发布者评级变更为 ${newGrade}，策略价格从 ${currentPrice} 元调整为 ${newPrice} 元，退还剩余 ${remainingDays} 天差价`],
+              (err) => err ? reject(err) : resolve()
+            );
+          });
+        }
+      }
+
+      truncatedStrategies.push({
+        strategyId: strategy.id,
+        strategyName: strategy.name,
+        oldPrice: currentPrice,
+        newPrice,
+        diff,
+        affectedSubscribers: subscribers.length,
+      });
+    }
+
+    // 4. 若新评级为 D：策略价格已归零（由上方 applyGradeChange 处理），收入冻结标记
+    if (newGrade === 'D') {
+      await new Promise((resolve, reject) => {
+        dbConn.run(
+          `UPDATE strategies SET income_frozen = 1 WHERE id = ?`,
+          [strategy.id],
+          (err) => err ? reject(err) : resolve()
+        );
+      }).catch(() => {
+        // income_frozen 字段若不存在则忽略，不阻断主流程
+      });
+    }
+  }
+
+  console.log(`[publisher-rating] 评级变动处理完成：发布者 ${publisherId} 新评级 ${newGrade}，` +
+    `共截断 ${truncatedStrategies.length} 个策略价格`);
+
+  return { truncatedCount: truncatedStrategies.length, strategies: truncatedStrategies };
+}
+
 module.exports = {
   calcAndSaveRating,
   checkPublishQuota,
   incrementPublishedCount,
   monthlyReset,
+  handleGradeDowngrade,
 };

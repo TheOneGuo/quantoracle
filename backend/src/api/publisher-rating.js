@@ -17,7 +17,9 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');  // 统一使用 db 模块，与其他 API 文件一致
-const { calcAndSaveRating, checkPublishQuota } = require('../services/publisher-rating');
+const { calcAndSaveRating, checkPublishQuota, incrementPublishedCount } = require('../services/publisher-rating');
+// 引入定价矩阵，用于发布策略时验证定价合法性
+const pricingCaps = require('../config/pricing-caps');
 
 /**
  * 中间件：简单的身份校验（从请求头或 session 取 publisherId）
@@ -167,3 +169,86 @@ module.exports = router;
 //   res.json({ success: true, strategy: newStrategy });
 // });
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/strategy/create
+// 发布新策略：额度检查 + 定价矩阵约束
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/strategy/create', requirePublisher, async (req, res) => {
+  try {
+    const dbConn = req.app.locals.db || db;
+    const publisherId = req.publisherId;
+
+    // 第一步：检查发布额度（C级当月禁止，D级3个月禁止）
+    const quota = await checkPublishQuota(dbConn, publisherId);
+    if (!quota.allowed) {
+      return res.status(403).json({ success: false, error: quota.reason });
+    }
+
+    // 获取发布者当前评级
+    const { grade } = await calcAndSaveRating(dbConn, publisherId).catch(() => ({ grade: 'B' }));
+    // 优先使用已有评级记录，避免重复计算
+    const ratingRow = await new Promise((resolve, reject) => {
+      (dbConn.db || dbConn).get(
+        `SELECT grade FROM publisher_ratings WHERE publisher_id = ? ORDER BY calculated_at DESC LIMIT 1`,
+        [publisherId],
+        (err, row) => err ? reject(err) : resolve(row)
+      );
+    }).catch(() => null);
+    const publisherGrade = ratingRow?.grade || grade || 'B';
+
+    // 第二步：定价矩阵约束验证
+    const { capital_tier, initial_price } = req.body;
+
+    // 检查该评级×档次是否允许发布
+    const cap = pricingCaps.getInitialPriceCap(publisherGrade, capital_tier);
+    if (cap === null) {
+      return res.status(403).json({
+        success: false,
+        error: `当前评级（${publisherGrade}）本月禁止发布策略`,
+      });
+    }
+
+    // D级策略强制免费，不需要用户填写价格；其他等级截断至上限
+    const finalPrice = cap === 0 ? 0 : Math.min(initial_price || cap, cap);
+
+    // 构造策略数据（其余字段由请求体传入）
+    const strategyData = {
+      ...req.body,
+      publisher_id: publisherId,
+      price_monthly: finalPrice,
+      price_yearly: finalPrice * 10,
+      capital_tier,
+      status: 'pending', // 新策略进入待审核状态
+    };
+
+    // 插入策略记录
+    const newStrategyId = await new Promise((resolve, reject) => {
+      (dbConn.db || dbConn).run(
+        `INSERT INTO strategies
+           (publisher_id, name, description, capital_tier, price_monthly, price_yearly, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [strategyData.publisher_id, strategyData.name, strategyData.description,
+         strategyData.capital_tier, strategyData.price_monthly, strategyData.price_yearly,
+         strategyData.status],
+        function (err) { err ? reject(err) : resolve(this.lastID); }
+      );
+    });
+
+    // 递增发布计数（消耗本月额度）
+    await incrementPublishedCount(dbConn, publisherId);
+
+    res.json({
+      success: true,
+      strategy: {
+        id: newStrategyId,
+        ...strategyData,
+        priceAdjusted: finalPrice !== (initial_price || cap), // 是否被矩阵截断
+        priceCap: cap, // 当前评级×档次的初始定价上限
+      },
+    });
+  } catch (err) {
+    console.error('[publisher-rating] strategy/create error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});

@@ -8,6 +8,8 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { calcCreditGrade } = require('../services/credit-scorer');
+// 引入定价矩阵，用于策略详情中返回天花板和地板信息
+const pricingCaps = require('../config/pricing-caps');
 
 // ============================================================
 // 工具函数
@@ -287,6 +289,23 @@ router.get('/strategies/:id', async (req, res) => {
       ORDER BY stat_month ASC
     `, [id]);
 
+    // 查询发布者评级（用于前端展示评级徽章及定价上限）
+    let publisherGrade = 'B'; // 兜底值
+    try {
+      const gradeRow = await db.get(
+        `SELECT grade FROM publisher_ratings WHERE publisher_id = ? ORDER BY calculated_at DESC LIMIT 1`,
+        [strategy.publisher_id]
+      );
+      if (gradeRow?.grade) publisherGrade = gradeRow.grade;
+    } catch (_) {}
+
+    // 计算当前评级×档次的调价天花板和价格地板（用于前端展示）
+    const capitalTier = strategy.capital_tier;
+    const priceCeiling = pricingCaps.getPriceCeiling(publisherGrade, capitalTier);
+    const priceFloor = strategy.price_monthly
+      ? Math.floor(strategy.price_monthly * pricingCaps.PRICE_FLOOR_RATIO)
+      : 0;
+
     res.json({
       success: true,
       data: {
@@ -305,6 +324,10 @@ router.get('/strategies/:id', async (req, res) => {
           maxDrawdown:     Math.round((strategy.max_drawdown || 0) * 1000) / 10,
           sharpeRatio:     strategy.sharpe_ratio,
           createdAt:       strategy.created_at,
+          // 评级与定价约束信息（供前端展示徽章和定价说明）
+          publisherGrade,                    // 发布者评级（S+/S/A/B/C/D）
+          priceCeiling:  priceCeiling ?? 0,  // 当前评级×档次的调价天花板（元）
+          priceFloor,                        // 价格地板（初始定价×30%，防止恶意差评归零）
         },
         rulesSummary: strategy.rules_summary || null, // 规则摘要（发布者填写的公开说明）
         simData,
