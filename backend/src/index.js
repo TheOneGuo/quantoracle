@@ -174,6 +174,8 @@ async function runTradingRules(holding, stockData) {
 app.get('/api/stock/:code', async (req, res) => {
   try {
     const { code } = req.params;
+    // 已验证真实数据源：调用新浪财经/腾讯财经实时行情接口
+    // 默认使用新浪财经: https://hq.sinajs.cn/list=<code>
     const data = await stockAPI.getRealtimeQuote(code);
     if (data) {
       res.json({ success: true, data });

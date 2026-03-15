@@ -26,7 +26,8 @@ class StockAPI {
   }
 
   /**
-   * 新浪财经 API
+   * 新浪财经 API（已验证真实数据源）
+   * 接口URL: https://hq.sinajs.cn/list=<code>
    * 格式: https://hq.sinajs.cn/list=sh600519
    */
   async getSinaQuote(code) {
@@ -70,7 +71,8 @@ class StockAPI {
   }
 
   /**
-   * 腾讯财经 API
+      * 腾讯财经 API（已验证真实数据源）
+   * 接口URL: https://qt.gtimg.cn/q=<code>
    * 格式: https://qt.gtimg.cn/q=sh600519
    */
   async getTencentQuote(code) {
