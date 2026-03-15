@@ -1,13 +1,48 @@
 /**
- * @file Telegram公开频道新闻抓取服务
+ * @file Telegram公开频道新闻抓取服务（RSS优先版）
  * @module services/tg-news-fetcher
  *
- * 主方式：Telegram Bot API getChatHistory（Bot需已加入频道）
- * 备用方式：RSS（通过公共RSSHub实例，无需Bot Token）
+ * 主方式：RSS（通过公共RSSHub实例，无需Bot Token）
+ * 备用方式：Telegram Bot API（需配置TG_BOT_TOKEN，可选）
+ *
+ * RSS实例轮询顺序：
+ *   1. rsshub.rssforever.com（默认主力）
+ *   2. rsshub.app（备用，有限流风险）
+ *   3. 其他环境变量配置的实例
  */
 
 const https = require('https');
 const http = require('http');
+
+// ─────────────────────────────────────────────────────────
+// 内存缓存（5分钟内同频道不重复拉取）
+// ─────────────────────────────────────────────────────────
+
+/** @type {Map<string, {ts: number, items: Array}>} */
+const _rssCache = new Map();
+
+/** 缓存有效期：5分钟 */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// ─────────────────────────────────────────────────────────
+// RSSHub 实例列表
+// 优先从环境变量读取（逗号分隔URL前缀），fallback 到默认顺序
+// ─────────────────────────────────────────────────────────
+
+/** 将URL前缀转换为完整路径模板 */
+function buildRSSInstances() {
+  if (process.env.RSS_HUB_INSTANCES) {
+    return process.env.RSS_HUB_INSTANCES.split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(base => `${base}/telegram/channel/{channel}`);
+  }
+  // 默认实例列表（经测试可用的排在前面）
+  return [
+    'https://rsshub.rssforever.com/telegram/channel/{channel}',
+    'https://rsshub.app/telegram/channel/{channel}',
+  ];
+}
 
 // ─────────────────────────────────────────────────────────
 // 内部工具
@@ -16,13 +51,17 @@ const http = require('http');
 /**
  * 简单 HTTP GET，返回响应体字符串
  * @param {string} url
- * @param {number} [timeoutMs=8000]
+ * @param {number} [timeoutMs=10000]
  * @returns {Promise<string>}
  */
-function httpGet(url, timeoutMs = 8000) {
+function httpGet(url, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https') ? https : http;
     const req = lib.get(url, { timeout: timeoutMs }, (res) => {
+      // 跟随3xx重定向（最多1次）
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(httpGet(res.headers.location, timeoutMs));
+      }
       if (res.statusCode !== 200) {
         return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
       }
@@ -75,87 +114,80 @@ function parseRSS(xml) {
 }
 
 // ─────────────────────────────────────────────────────────
-// 3.3 消息标准化
+// 3.2 RSS 主要方式（多实例轮询）
 // ─────────────────────────────────────────────────────────
 
 /**
- * 将Telegram Bot API 消息标准化为 NewsItem
- * @param {Object} rawMsg  - Bot API Message 对象
- * @param {string} sourceAlias
- * @param {number} sourceWeight
- * @returns {NewsItem}
+ * 通过公共 RSSHub 抓取 Telegram 公开频道（无需 Bot Token）
+ * 按顺序尝试各实例，成功即停；全部失败返回空数组并记录日志。
+ * 5分钟内对同一频道使用内存缓存，避免重复拉取。
+ *
+ * @param {string} channelUsername - 频道用户名（含或不含@均可，如 jin10light 或 @jin10light）
+ * @returns {Promise<{items: Array<Object>, endpoint: string}>}
  */
-function normalizeMessage(rawMsg, sourceAlias, sourceWeight) {
-  return {
-    id: null,
-    raw_id: String(rawMsg.message_id || rawMsg.id || ''),
-    source_key: sourceAlias,                          // 别名，不存真实频道ID
-    content: rawMsg.text || rawMsg.caption || '',
-    url: rawMsg.link || null,
-    published_at: rawMsg.date
-      ? new Date(rawMsg.date * 1000).toISOString()
-      : new Date().toISOString(),
-    views: rawMsg.views || 0,
-    source_weight: sourceWeight,
-    score: null,
-    category: null,
-    dedup_hash: null,
-  };
+async function fetchFromRSS(channelUsername) {
+  // 去掉可能带的 @
+  const name = channelUsername.replace(/^@/, '');
+
+  // 检查内存缓存
+  const cached = _rssCache.get(name);
+  if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
+    console.log(`[tg-news-fetcher] RSS缓存命中: ${name}，${cached.items.length} 条`);
+    return { items: cached.items, endpoint: cached.endpoint, fromCache: true };
+  }
+
+  const instances = buildRSSInstances();
+  const errors = [];
+
+  for (const template of instances) {
+    const url = template.replace('{channel}', name);
+    try {
+      console.log(`[tg-news-fetcher] 尝试RSS实例: ${url}`);
+      const xml = await httpGet(url, 10000);
+
+      // 检测是否为限流提示（rsshub.app 的纯文本提示）
+      if (!xml.trim().startsWith('<') && xml.includes('restrict')) {
+        throw new Error('RSS实例返回限流提示，非有效XML');
+      }
+
+      const items = parseRSS(xml);
+      if (items.length > 0) {
+        // 写入缓存
+        _rssCache.set(name, { ts: Date.now(), items, endpoint: url });
+        console.log(`[tg-news-fetcher] RSS成功: ${url}，获取 ${items.length} 条`);
+        return { items, endpoint: url };
+      }
+      errors.push(`${url}: 解析到0条（可能频道不公开或格式异常）`);
+    } catch (e) {
+      errors.push(`${url}: ${e.message}`);
+      console.warn(`[tg-news-fetcher] RSS实例失败: ${url} → ${e.message}`);
+    }
+  }
+
+  // 全部失败，记录日志，返回空数组（不抛异常，避免中断整体轮询）
+  console.error(`[tg-news-fetcher] 频道 ${name} 所有RSS端点均失败:\n  ${errors.join('\n  ')}`);
+  return { items: [], endpoint: null, errors };
 }
 
-/**
- * 将 RSS 条目标准化为 NewsItem
- * @param {Object} item  - parseRSS 返回的条目
- * @param {string} sourceAlias
- * @param {number} sourceWeight
- * @returns {NewsItem}
- */
-function normalizeRSSItem(item, sourceAlias, sourceWeight) {
-  // 优先使用 description（含正文），title 作为补充
-  const content = (item.description || item.title || '').replace(/<[^>]+>/g, '').trim();
-  return {
-    id: null,
-    raw_id: item.guid || item.link || '',
-    source_key: sourceAlias,
-    content,
-    url: item.link || null,
-    published_at: item.pubDate instanceof Date
-      ? item.pubDate.toISOString()
-      : new Date().toISOString(),
-    views: 0,
-    source_weight: sourceWeight,
-    score: null,
-    category: null,
-    dedup_hash: null,
-  };
-}
-
 // ─────────────────────────────────────────────────────────
-// 3.1 Bot API 方式（主）
+// 3.1 Bot API 方式（可选备用，需 TG_BOT_TOKEN）
 // ─────────────────────────────────────────────────────────
 
 /**
- * 从Telegram公开频道/群组抓取最新消息（Bot必须已是成员）
+ * 通过 Telegram Bot API 的 getUpdates 接口拉取频道消息
+ * 仅当环境变量 TG_BOT_TOKEN 已配置时有效。
  *
- * Telegram Bot API 无「getHistory」端点；
- * 实践上使用 forwardMessages（Bot 转发消息给自己）或
- * 通过 getUpdates 被动接收频道推送。
+ * 注意：Bot需已加入目标频道，且会收到所有频道的 channel_post 事件。
+ * 建议仅在 RSS 不可用时作为备选。
  *
- * 此函数采用「copyMessage 探测 + getUpdates 滚动」策略：
- *  - 若 offsetId = 0，通过 getUpdates 拿最新批次
- *  - 若 offsetId > 0，使用 allowed_updates + offset 继续
- *
- * 注意：对于纯公开频道，Bot 加入后会在 getUpdates 中收到
- * channel_post 事件，这是最可靠的实时方式。
- *
- * @param {string} channelId - 频道username（含@）或数字ID（如 -100xxx）
- * @param {number} limit
- * @param {number} updateOffset - getUpdates offset（非消息ID）
- * @returns {Promise<{messages: Array<NewsItem>, nextOffset: number}>}
+ * @param {string} channelId - 频道username（含@）或数字ID
+ * @param {number} [limit=20]
+ * @param {number} [updateOffset=0] - getUpdates offset
+ * @returns {Promise<{messages: Array, nextOffset: number}>}
  */
 async function fetchFromBotAPI(channelId, limit = 20, updateOffset = 0) {
   const token = process.env.TG_BOT_TOKEN;
-  if (!token) throw new Error('TG_BOT_TOKEN 未配置');
+  if (!token) throw new Error('TG_BOT_TOKEN 未配置，Bot API不可用');
 
   const base = `https://api.telegram.org/bot${token}`;
   const url = `${base}/getUpdates?offset=${updateOffset}&limit=${limit}&timeout=0&allowed_updates=["channel_post","message"]`;
@@ -196,47 +228,59 @@ async function fetchFromBotAPI(channelId, limit = 20, updateOffset = 0) {
 }
 
 // ─────────────────────────────────────────────────────────
-// 3.2 RSS 备用方式
+// 3.3 消息标准化
 // ─────────────────────────────────────────────────────────
 
-/** 公共 RSSHub 实例列表（按优先级排序，支持 {channel} 占位符）
- * 优先从环境变量 RSS_HUB_INSTANCES 读取（逗号分隔）
- * fallback 到硬编码顺序：tg.i-c-a.su 排第一（Financial_Express 仅此可用）
+/**
+ * 将 Telegram Bot API 消息标准化为 NewsItem
+ * @param {Object} rawMsg  - Bot API Message 对象
+ * @param {string} sourceAlias
+ * @param {number} sourceWeight
+ * @returns {NewsItem}
  */
-const RSS_INSTANCES = process.env.RSS_HUB_INSTANCES
-  ? process.env.RSS_HUB_INSTANCES.split(',')
-  : [
-      'https://tg.i-c-a.su/rss/{channel}',
-      'https://rsshub.rssforever.com/telegram/channel/{channel}',
-      'https://rsshub.app/telegram/channel/{channel}',
-    ];
+function normalizeMessage(rawMsg, sourceAlias, sourceWeight) {
+  return {
+    id: null,
+    raw_id: String(rawMsg.message_id || rawMsg.id || ''),
+    source_key: sourceAlias,
+    content: rawMsg.text || rawMsg.caption || '',
+    url: rawMsg.link || null,
+    published_at: rawMsg.date
+      ? new Date(rawMsg.date * 1000).toISOString()
+      : new Date().toISOString(),
+    views: rawMsg.views || 0,
+    source_weight: sourceWeight,
+    score: null,
+    category: null,
+    dedup_hash: null,
+  };
+}
 
 /**
- * 通过公共 RSSHub 抓取 Telegram 公开频道（无需 Bot Token）
- * 逐个尝试，返回第一个成功的结果
- *
- * @param {string} channelUsername - 不含@的频道用户名（如 caixin）
- * @returns {Promise<Array<Object>>} 原始 RSS 条目
+ * 将 RSS 条目标准化为 NewsItem
+ * @param {Object} item  - parseRSS 返回的条目
+ * @param {string} sourceAlias
+ * @param {number} sourceWeight
+ * @returns {NewsItem}
  */
-async function fetchFromRSS(channelUsername) {
-  // 去掉可能带的 @
-  const name = channelUsername.replace(/^@/, '');
-  const errors = [];
-
-  for (const instance of RSS_INSTANCES) {
-    const url = instance.replace('{channel}', name);
-    try {
-      const xml = await httpGet(url, 10000);
-      const items = parseRSS(xml);
-      if (items.length > 0) {
-        return { items, endpoint: url };
-      }
-    } catch (e) {
-      errors.push(`${url}: ${e.message}`);
-    }
-  }
-
-  throw new Error(`所有RSS端点均失败: ${errors.join(' | ')}`);
+function normalizeRSSItem(item, sourceAlias, sourceWeight) {
+  // 优先使用 description（含正文），title 作为补充，去除HTML标签
+  const content = (item.description || item.title || '').replace(/<[^>]+>/g, '').trim();
+  return {
+    id: null,
+    raw_id: item.guid || item.link || '',
+    source_key: sourceAlias,
+    content,
+    url: item.link || null,
+    published_at: item.pubDate instanceof Date
+      ? item.pubDate.toISOString()
+      : new Date().toISOString(),
+    views: 0,
+    source_weight: sourceWeight,
+    score: null,
+    category: null,
+    dedup_hash: null,
+  };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -244,8 +288,8 @@ async function fetchFromRSS(channelUsername) {
 // ─────────────────────────────────────────────────────────
 
 module.exports = {
-  fetchFromBotAPI,
   fetchFromRSS,
+  fetchFromBotAPI,
   normalizeMessage,
   normalizeRSSItem,
   // 内部工具也暴露，方便测试

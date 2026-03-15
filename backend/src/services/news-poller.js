@@ -93,31 +93,47 @@ class NewsPoller {
   // ─────────────────────────────────────────────────────
 
   /**
-   * 拉取单个来源，优先Bot API，失败则RSS
+   * 拉取单个来源：RSS 优先，Bot API 作为可选备选
+   *
+   * 策略：
+   *   1. 优先走 RSS（支持多实例轮询，无需 Token）
+   *   2. RSS 全部失败且配置了 TG_BOT_TOKEN 时，尝试 Bot API
+   *   3. 全部方式失败则记录日志并返回 0
+   *
    * @param {{id: string, alias: string, weight: number, key: string}} source
    * @returns {Promise<number>} 实际入库数量
    */
   async pollSource(source) {
     let rawItems = [];
-    let usedMethod = 'bot';
+    let usedMethod = 'rss';
 
-    // 尝试 Bot API
-    try {
-      const offset = this._offsets[source.key] || 0;
-      const { messages, nextOffset } = await fetchFromBotAPI(source.id, 20, offset);
-      this._offsets[source.key] = nextOffset;
-      rawItems = messages.map((m) => normalizeMessage(m, source.alias, source.weight));
-    } catch (botErr) {
-      console.warn(`[NewsPoller][${source.alias}] Bot API失败，降级RSS: ${botErr.message}`);
-      usedMethod = 'rss';
-      // 降级RSS（仅当频道ID是username时可用）
-      const username = source.id.replace(/^@/, '');
-      if (/^-?\d+$/.test(username)) {
-        // 纯数字ID，无法走RSS
-        throw new Error('数字ID无法走RSS降级，请配置username');
+    // ── 方式1：RSS 优先（无需 Token，支持多实例轮询） ──
+    const username = source.id.replace(/^@/, '');
+    const isPureNumericId = /^-?\d+$/.test(username);
+
+    if (!isPureNumericId) {
+      // 频道为 username 格式，走 RSS
+      const { items, endpoint, errors } = await fetchFromRSS(username);
+      if (items.length > 0) {
+        rawItems = items.map((item) => normalizeRSSItem(item, source.alias, source.weight));
+      } else if (errors) {
+        console.warn(`[NewsPoller][${source.alias}] RSS全部失败，尝试Bot API备选`);
       }
-      const { items } = await fetchFromRSS(username);
-      rawItems = items.map((item) => normalizeRSSItem(item, source.alias, source.weight));
+    } else {
+      console.warn(`[NewsPoller][${source.alias}] 纯数字ID无法走RSS，直接尝试Bot API`);
+    }
+
+    // ── 方式2：Bot API 备选（仅在 RSS 无结果且有 Token 时） ──
+    if (rawItems.length === 0 && process.env.TG_BOT_TOKEN) {
+      try {
+        usedMethod = 'bot';
+        const offset = this._offsets[source.key] || 0;
+        const { messages, nextOffset } = await fetchFromBotAPI(source.id, 20, offset);
+        this._offsets[source.key] = nextOffset;
+        rawItems = messages.map((m) => normalizeMessage(m, source.alias, source.weight));
+      } catch (botErr) {
+        console.error(`[NewsPoller][${source.alias}] Bot API也失败: ${botErr.message}`);
+      }
     }
 
     if (rawItems.length === 0) return 0;
