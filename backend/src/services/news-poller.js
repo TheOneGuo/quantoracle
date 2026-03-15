@@ -180,17 +180,28 @@ class NewsPoller {
 
     if (isDuplicate) {
       console.log(`[NewsPoller][${source.alias}] 重复跳过 (${reason})`);
+      // 记录去重日志（方便后续审计和调优）
+      await new Promise((resolve) => {
+        const method = reason && reason.startsWith('jaccard') ? 'jaccard' : 'exact_hash';
+        const sim = method === 'jaccard' ? parseFloat(reason.split(':')[1] || '0') : null;
+        db.run(
+          `INSERT INTO news_dedup_log (content_hash, source_key, raw_id, content_preview, dedup_method, similarity_score, duplicate_of_raw_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [item.dedup_hash, item.source_key, item.raw_id, (item.content || '').slice(0, 100), method, sim, duplicateOf || null],
+          () => resolve()
+        );
+      });
       return 0;
     }
 
-    // 分类
-    const { assetType, eventType, stockCodes } = classifyNews(item.content);
+    // 分类（规则引擎，含情绪和紧急程度）
+    const { assetType, eventType, sentiment, urgency, stockCodes } = classifyNews(item.content);
 
-    // 写入 news_processed
+    // 写入 news_processed（含新增的 sentiment / urgency / channel_type 字段）
     await new Promise((resolve, reject) => {
       db.run(
-        `INSERT INTO news_processed (raw_id, content, url, published_at, source_key, source_weight, asset_type, event_type, stock_codes, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        `INSERT INTO news_processed (raw_id, content, url, published_at, source_key, source_weight, asset_type, event_type, stock_codes, sentiment, urgency, channel_type, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           rawId,
           item.content,
@@ -201,6 +212,9 @@ class NewsPoller {
           assetType,
           eventType,
           JSON.stringify(stockCodes),
+          sentiment,
+          urgency,
+          source.channelType || 'general',
         ],
         function (err) {
           if (err) reject(err);
