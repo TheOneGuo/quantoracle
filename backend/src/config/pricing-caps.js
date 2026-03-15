@@ -117,6 +117,32 @@ function applyGradeChange(currentPrice, newGrade, tier) {
   return { newPrice: ceiling, truncated: true, diff: currentPrice - ceiling };
 }
 
+/**
+ * 计算终身定价建议值（月价×10）
+ * S/S+发布者可在建议值±20%范围内微调（月价×8 至 月价×12）
+ *
+ * @param {number} monthlyPrice 月订阅价格（元）
+ * @returns {{ suggested: number, min: number, max: number }}
+ */
+function calcLifetimePrice(monthlyPrice) {
+  return {
+    suggested: monthlyPrice * 10,               // 建议值（相当于10个月费）
+    min: Math.floor(monthlyPrice * 8),           // 最低可设（月价×8，约打83折）
+    max: Math.ceil(monthlyPrice * 12),           // 最高可设（月价×12，约有溢价）
+  };
+}
+
+/**
+ * 检查发布者是否有权开启终身定价
+ * 仅 S 及以上评级（S/S+）可开启双重定价模式
+ *
+ * @param {string} grade 发布者评级（S+/S/A/B/C/D）
+ * @returns {boolean}
+ */
+function canSetLifetimePricing(grade) {
+  return grade === 'S+' || grade === 'S';
+}
+
 module.exports = {
   CAPITAL_TIERS,
   INITIAL_PRICE_CAPS,
@@ -126,4 +152,6 @@ module.exports = {
   getPriceCeiling,
   validatePrice,
   applyGradeChange,
+  calcLifetimePrice,
+  canSetLifetimePricing,
 };
