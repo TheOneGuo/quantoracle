@@ -7,6 +7,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useBrokerWS } from '../hooks/useBrokerWS';
+import BrokerVideoUpload from './BrokerVideoUpload';
 import './BrokerPanel.css';
 
 const API_BASE = 'http://localhost:3001/api';
@@ -148,6 +149,7 @@ function BrokerPanel() {
           { key: 'orders', label: '📋 委托' },
           { key: 'trade', label: '⚡ 下单' },
           { key: 'signals', label: `🔔 信号${signals.length > 0 ? ` (${signals.length})` : ''}` },
+          { key: 'live-verify', label: '🎬 实盘验证' },
         ].map(tab => (
           <button
             key={tab.key}
@@ -343,6 +345,10 @@ function BrokerPanel() {
               </div>
             )}
           </div>
+        )}
+        {/* 实盘验证 - 视频OCR识别 */}
+        {activeTab === 'live-verify' && (
+          <BrokerVideoUpload token={localStorage.getItem('token') || ''} />
         )}
       </div>
     </div>
