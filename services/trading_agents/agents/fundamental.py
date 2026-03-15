@@ -12,6 +12,69 @@ from ..data.stock_data import get_stock_data_client
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# 行业平均估值参考（A股，数据可定期更新）
+# pe: 市盈率, pb: 市净率, roe: 净资产收益率(%)
+# 来源：Wind/Choice 行业中位数，每年可更新一次
+# ============================================================
+INDUSTRY_BENCHMARKS = {
+    "银行":   {"pe": 6,  "pb": 0.7, "roe": 12},
+    "证券":   {"pe": 20, "pb": 1.8, "roe": 8},
+    "保险":   {"pe": 12, "pb": 1.5, "roe": 10},
+    "白酒":   {"pe": 30, "pb": 8,   "roe": 25},
+    "医药":   {"pe": 35, "pb": 4,   "roe": 15},
+    "新能源": {"pe": 25, "pb": 3,   "roe": 12},
+    "房地产": {"pe": 10, "pb": 0.8, "roe": 8},
+    "消费":   {"pe": 28, "pb": 5,   "roe": 18},
+    "科技":   {"pe": 40, "pb": 5,   "roe": 15},
+    "通用":   {"pe": 20, "pb": 2,   "roe": 12},  # 兜底默认值
+}
+
+def _get_industry_benchmark(industry: str) -> Dict[str, float]:
+    """
+    根据行业名称获取对应的估值基准。
+    如果行业名称不在预设字典中，关键词模糊匹配，否则返回"通用"基准。
+    """
+    if not industry or industry == "未知":
+        return INDUSTRY_BENCHMARKS["通用"]
+    # 精确匹配
+    if industry in INDUSTRY_BENCHMARKS:
+        return INDUSTRY_BENCHMARKS[industry]
+    # 关键词模糊匹配
+    for key in INDUSTRY_BENCHMARKS:
+        if key in industry or industry in key:
+            return INDUSTRY_BENCHMARKS[key]
+    return INDUSTRY_BENCHMARKS["通用"]
+
+def _compare_with_benchmark(value: Optional[float], benchmark: float, metric: str) -> Dict[str, Any]:
+    """
+    将个股指标与行业基准对比，返回对比描述和相对偏差。
+    
+    Args:
+        value: 个股实际值
+        benchmark: 行业基准值
+        metric: 指标名称（pe/pb/roe）
+    
+    Returns:
+        {diff_pct: 偏差百分比, description: 描述文字, is_better: 是否优于行业}
+    """
+    if value is None or benchmark == 0:
+        return {"diff_pct": None, "description": "数据不足", "is_better": None}
+    
+    diff_pct = round((value - benchmark) / benchmark * 100, 1)
+    abs_diff = abs(diff_pct)
+    
+    # pe/pb 越低越好，roe 越高越好
+    if metric in ("pe", "pb"):
+        is_better = value < benchmark
+        direction = "低于" if value < benchmark else "高于"
+    else:  # roe
+        is_better = value > benchmark
+        direction = "高于" if value > benchmark else "低于"
+    
+    description = f"{direction}行业均值{abs_diff}%"
+    return {"diff_pct": diff_pct, "description": description, "is_better": is_better}
+
 
 class FundamentalAgent:
     """
@@ -130,6 +193,21 @@ class FundamentalAgent:
         Returns:
             LLM 分析结果字典，失败返回 None
         """
+        # 获取行业基准并加入提示词
+        industry = metrics.get("industry", "通用")
+        benchmark = _get_industry_benchmark(industry)
+        benchmark_text = f"- 行业PE均值: {benchmark['pe']}, PB均值: {benchmark['pb']}, ROE均值: {benchmark['roe']}%"
+        
+        # 个股与行业对比描述
+        pe_cmp = _compare_with_benchmark(metrics.get("pe"), benchmark["pe"], "pe")
+        pb_cmp = _compare_with_benchmark(metrics.get("pb"), benchmark["pb"], "pb")
+        roe_cmp = _compare_with_benchmark(metrics.get("roe"), benchmark["roe"], "roe")
+        comparison_text = "\n".join([
+            f"- PE: {pe_cmp['description']}",
+            f"- PB: {pb_cmp['description']}",
+            f"- ROE: {roe_cmp['description']}"
+        ])
+        
         # 构建提示词
         metrics_text = "\n".join([f"- {k}: {v}" for k, v in metrics.items()])
         
@@ -143,18 +221,24 @@ class FundamentalAgent:
 基本面指标：
 {metrics_text}
 
-请按以下格式输出 JSON：
+行业基准（{industry}）：
+{benchmark_text}
+
+个股与行业对比：
+{comparison_text}
+
+请按以下格式输出 JSON（评分时请参考行业对比，行业相对估值权重40%，绝对指标权重60%）：
 {{
   "score": 0.85,  // 0-1的评分，保留两位小数
-  "reason": "详细的分析理由，包括估值、盈利能力、成长性、财务健康等方面的分析",
+  "reason": "详细的分析理由，需包含与行业均值的对比（低于/高于行业均值X%），以及估值、盈利能力、成长性、财务健康等分析",
   "strengths": ["优势1", "优势2", "优势3"],
   "weaknesses": ["劣势1", "劣势2", "劣势3"]
 }}
 
 评分参考标准：
-1. 优秀（0.8-1.0）：估值合理或偏低，盈利能力强，成长性好，财务健康
+1. 优秀（0.8-1.0）：估值合理或低于行业均值，盈利能力强，成长性好，财务健康
 2. 良好（0.6-0.8）：估值略高但有亮点，盈利能力中等，成长性一般，财务基本健康
-3. 一般（0.4-0.6）：估值偏高，盈利能力一般，成长性有限，财务有隐忧
+3. 一般（0.4-0.6）：估值高于行业均值，盈利能力一般，成长性有限，财务有隐忧
 4. 较差（0.2-0.4）：估值过高，盈利能力差，成长性差，财务风险大
 5. 很差（0.0-0.2）：基本面存在重大问题
 
@@ -175,7 +259,11 @@ class FundamentalAgent:
     
     def _rule_based_analysis(self, code: str, metrics: Dict) -> Dict[str, Any]:
         """
-        LLM 失败时的规则引擎分析
+        LLM 失败时的规则引擎分析（含行业对比基准）
+        
+        评分权重：
+        - 行业相对估值（PE/PB 对比行业均值）：占 40%
+        - 绝对指标（ROE、成长性、负债率等）：占 60%
         
         Args:
             code: 股票代码
@@ -184,91 +272,139 @@ class FundamentalAgent:
         Returns:
             规则分析结果
         """
-        score = 0.5  # 默认中等评分
+        industry = metrics.get("industry", "通用")
+        benchmark = _get_industry_benchmark(industry)
+        
+        # ---- 行业相对评分（权重40%）----
+        relative_score = 0.5  # 基准分
+        relative_parts = []
+        
+        pe = metrics.get("pe")
+        pe_cmp = _compare_with_benchmark(pe, benchmark["pe"], "pe")
+        if pe_cmp["is_better"] is True:
+            relative_score += 0.15
+            relative_parts.append(f"PE{pe_cmp['description']}")
+        elif pe_cmp["is_better"] is False:
+            relative_score -= 0.1
+            relative_parts.append(f"PE{pe_cmp['description']}")
+        
+        pb = metrics.get("pb")
+        pb_cmp = _compare_with_benchmark(pb, benchmark["pb"], "pb")
+        if pb_cmp["is_better"] is True:
+            relative_score += 0.1
+            relative_parts.append(f"PB{pb_cmp['description']}")
+        elif pb_cmp["is_better"] is False:
+            relative_score -= 0.05
+            relative_parts.append(f"PB{pb_cmp['description']}")
+        
+        roe = metrics.get("roe")
+        roe_cmp = _compare_with_benchmark(roe, benchmark["roe"], "roe")
+        if roe_cmp["is_better"] is True:
+            relative_score += 0.1
+            relative_parts.append(f"ROE{roe_cmp['description']}")
+        elif roe_cmp["is_better"] is False:
+            relative_score -= 0.1
+            relative_parts.append(f"ROE{roe_cmp['description']}")
+        
+        relative_score = max(0.0, min(1.0, relative_score))
+        
+        # ---- 绝对指标评分（权重60%）----
+        absolute_score = 0.5
         strengths = []
         weaknesses = []
-        reason_parts = []
+        absolute_parts = []
         
-        # 1. 估值分析
-        pe = metrics.get("pe")
+        # 估值绝对值
         if pe is not None:
             if pe < 15:
-                score += 0.1
+                absolute_score += 0.1
                 strengths.append("估值偏低")
-                reason_parts.append(f"市盈率{pe:.1f}倍，估值偏低")
+                absolute_parts.append(f"PE{pe:.1f}倍估值偏低")
             elif pe > 30:
-                score -= 0.1
+                absolute_score -= 0.1
                 weaknesses.append("估值偏高")
-                reason_parts.append(f"市盈率{pe:.1f}倍，估值偏高")
+                absolute_parts.append(f"PE{pe:.1f}倍估值偏高")
             else:
-                reason_parts.append(f"市盈率{pe:.1f}倍，估值合理")
+                absolute_parts.append(f"PE{pe:.1f}倍估值合理")
         
-        # 2. 盈利能力
-        roe = metrics.get("roe")
+        # ROE 绝对值
         if roe is not None:
             if roe > 15:
-                score += 0.15
+                absolute_score += 0.15
                 strengths.append("盈利能力强")
-                reason_parts.append(f"ROE{roe:.1f}%，盈利能力强")
+                absolute_parts.append(f"ROE{roe:.1f}%盈利能力强")
             elif roe < 5:
-                score -= 0.1
+                absolute_score -= 0.1
                 weaknesses.append("盈利能力弱")
-                reason_parts.append(f"ROE{roe:.1f}%，盈利能力偏弱")
-            else:
-                reason_parts.append(f"ROE{roe:.1f}%，盈利能力一般")
+                absolute_parts.append(f"ROE{roe:.1f}%盈利能力偏弱")
         
-        # 3. 成长性
+        # 成长性
         revenue_growth = metrics.get("revenue_growth")
         if revenue_growth is not None:
             if revenue_growth > 20:
-                score += 0.1
+                absolute_score += 0.1
                 strengths.append("成长性高")
-                reason_parts.append(f"营收增长{revenue_growth:.1f}%，成长性高")
+                absolute_parts.append(f"营收增长{revenue_growth:.1f}%")
             elif revenue_growth < 0:
-                score -= 0.05
+                absolute_score -= 0.05
                 weaknesses.append("营收负增长")
-                reason_parts.append(f"营收增长{revenue_growth:.1f}%，负增长")
+                absolute_parts.append(f"营收负增长{revenue_growth:.1f}%")
         
-        # 4. 财务健康
+        # 财务健康
         debt_ratio = metrics.get("debt_ratio")
         if debt_ratio is not None:
             if debt_ratio < 50:
-                score += 0.05
+                absolute_score += 0.05
                 strengths.append("负债率低")
-                reason_parts.append(f"资产负债率{debt_ratio:.1f}%，财务稳健")
             elif debt_ratio > 70:
-                score -= 0.05
+                absolute_score -= 0.05
                 weaknesses.append("负债率高")
-                reason_parts.append(f"资产负债率{debt_ratio:.1f}%，负债偏高")
         
-        # 5. 股息率
+        # 股息率
         dividend_yield = metrics.get("dividend_yield")
         if dividend_yield is not None and dividend_yield > 3:
-            score += 0.05
+            absolute_score += 0.05
             strengths.append("股息率高")
-            reason_parts.append(f"股息率{dividend_yield:.1f}%，分红慷慨")
         
-        # 限制分数在0-1之间
-        score = max(0.0, min(1.0, score))
+        absolute_score = max(0.0, min(1.0, absolute_score))
         
-        # 生成理由
-        if not reason_parts:
-            reason = "基本面数据不足，无法进行深入分析"
-        else:
-            reason = f"{metrics.get('name', code)}基本面分析：" + "；".join(reason_parts)
+        # ---- 综合评分：行业相对40% + 绝对指标60% ----
+        final_score = round(relative_score * 0.4 + absolute_score * 0.6, 3)
         
-        # 如果没有识别到优劣势，设置默认值
+        # 构建理由
+        name = metrics.get("name", code)
+        reason_parts = []
+        if relative_parts:
+            reason_parts.append(f"【行业对比({industry})】" + "；".join(relative_parts))
+        if absolute_parts:
+            reason_parts.append("【绝对指标】" + "；".join(absolute_parts))
+        reason = f"{name}基本面分析：" + "；".join(reason_parts) if reason_parts else f"{name}数据不足，使用默认评分"
+        
+        # 补充行业基准到指标中，便于前端展示
+        metrics["industry_benchmark"] = benchmark
+        metrics["industry_comparison"] = {
+            "pe": pe_cmp,
+            "pb": pb_cmp,
+            "roe": roe_cmp
+        }
+        
         if not strengths:
             strengths = ["数据有限，优势不明显"]
         if not weaknesses:
             weaknesses = ["数据有限，劣势不明显"]
         
         return {
-            "score": score,
+            "score": final_score,
             "reason": reason,
             "metrics": metrics,
             "strengths": strengths,
             "weaknesses": weaknesses,
+            "score_breakdown": {
+                "relative_score": relative_score,
+                "absolute_score": absolute_score,
+                "relative_weight": 0.4,
+                "absolute_weight": 0.6
+            },
             "timestamp": datetime.now().isoformat(),
             "agent": self.name + " (Rule-Based)"
         }
