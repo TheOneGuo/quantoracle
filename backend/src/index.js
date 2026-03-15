@@ -2195,8 +2195,51 @@ app.get('/api/news/flash', async (req, res) => {
 
 app.get('/api/news/stock/:code', async (req, res) => {
   const code = req.params.code;
-  const count = req.query.count || 20;
-  await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
+  const count = Math.min(parseInt(req.query.count || '20', 10), 100);
+
+  try {
+    // 优先从本地 news_processed 表查询已分类的相关新闻
+    // stock_codes 字段是 JSON 数组，使用 LIKE 快速过滤（SQLite 无原生 JSON_CONTAINS）
+    const localRows = await new Promise((resolve, reject) => {
+      db.db.all(
+        `SELECT id, content, url, published_at, source_key, source_weight,
+                asset_type, event_type, sentiment, urgency, channel_type, stock_codes, score, status, created_at
+         FROM news_processed
+         WHERE stock_codes LIKE ?
+           AND datetime(created_at) > datetime('now', '-7 days')
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        [`%"${code}"%`, count],
+        (err, rows) => { if (err) reject(err); else resolve(rows || []); }
+      );
+    });
+
+    if (localRows.length > 0) {
+      // 有本地数据，直接返回（已分类，质量更高）
+      const data = localRows.map((r) => ({
+        title:        (r.content || '').slice(0, 60) + ((r.content || '').length > 60 ? '...' : ''),
+        content:      r.content,
+        url:          r.url || '',
+        published_at: r.published_at,
+        source_name:  r.source_key || 'Telegram',
+        asset_type:   r.asset_type,
+        event_type:   r.event_type,
+        sentiment:    r.sentiment || '中性',
+        urgency:      r.urgency || 'normal',
+        channel_type: r.channel_type,
+        stock_codes:  (() => { try { return JSON.parse(r.stock_codes || '[]'); } catch { return []; } })(),
+        score:        r.score,
+      }));
+      return res.json({ success: true, count: data.length, source: 'local_db', symbol: code, data });
+    }
+
+    // 本地无数据，降级到 Python AkShare 服务
+    await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
+  } catch (err) {
+    console.error(`[/api/news/stock/${code}]`, err.message);
+    // 双重兜底：两者都失败则返回 mock
+    await proxyNews(`/news/stock?symbol=${code}&count=${count}`, res);
+  }
 });
 
 // ────────────────────────────────────────────────────────────────
