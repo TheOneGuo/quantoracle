@@ -110,6 +110,12 @@ app.use('/api/sim', simRoutes);
 const brokerVideoRoutes = require('./broker/broker-video-routes');
 app.use('/api/broker', authRequired, brokerVideoRoutes);
 
+// M2：策略规则引擎路由
+const strategyRulesRouter = require('./api/strategy-rules');
+// 将 db 实例挂到 app 供路由使用
+app.set('db', db.db);
+app.use('/api/strategy', strategyRulesRouter);
+
 /**
  * 计算持仓汇总信息
  */
