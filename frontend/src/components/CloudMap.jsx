@@ -1,10 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './CloudMap.css';
+// 港股实时行情组件（对接 /api/hk/spot）
+import HKSpot from './HKSpot';
 
 function CloudMap() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('a_share');
+  // 港股子视图：'heatmap'（云图） 或 'spot'（实时行情）
+  const [hkSubView, setHkSubView] = useState('heatmap');
   // 定义tab配置，包含主URL和备用URL
   const tabsConfig = [
     { id: 'a_share', label: 'A股大盘云图', primaryUrl: 'https://dapanyuntu.com/', fallbackUrl: null },
@@ -69,23 +73,56 @@ function CloudMap() {
             className="cloudmap-tab-content"
             style={{ display: activeTab === tab.id ? 'block' : 'none' }}
           >
-            <iframe
-              src={currentUrls[tab.id]}
-              title={tab.label}
-              allowFullScreen
-              loading="lazy"
-              sandbox={
-                tab.id === 'forex'
-                  ? 'allow-scripts allow-same-origin allow-popups allow-forms'
-                  : 'allow-scripts allow-same-origin allow-popups'
-              }
-              style={{
-                width: '100%',
-                height: 'calc(100vh - 120px)',
-                border: 'none',
-              }}
-              onError={() => handleIframeError(tab.id, tab.fallbackUrl)}
-            />
+            {/* 港股Tab：在云图 iframe 上方增加子视图切换按钮 */}
+            {tab.id === 'hk' && (
+              <div style={{ display: 'flex', gap: 8, padding: '6px 12px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                <button
+                  onClick={() => setHkSubView('heatmap')}
+                  style={{
+                    padding: '4px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13,
+                    background: hkSubView === 'heatmap' ? '#388bfd' : '#21262d',
+                    color: '#e6edf3',
+                  }}
+                >
+                  🗺️ 云图
+                </button>
+                <button
+                  onClick={() => setHkSubView('spot')}
+                  style={{
+                    padding: '4px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13,
+                    background: hkSubView === 'spot' ? '#388bfd' : '#21262d',
+                    color: '#e6edf3',
+                  }}
+                >
+                  📈 实时行情
+                </button>
+              </div>
+            )}
+
+            {/* 港股实时行情子面板 */}
+            {tab.id === 'hk' && hkSubView === 'spot' ? (
+              <div style={{ height: 'calc(100vh - 160px)', overflow: 'auto' }}>
+                <HKSpot />
+              </div>
+            ) : (
+              <iframe
+                src={currentUrls[tab.id]}
+                title={tab.label}
+                allowFullScreen
+                loading="lazy"
+                sandbox={
+                  tab.id === 'forex'
+                    ? 'allow-scripts allow-same-origin allow-popups allow-forms'
+                    : 'allow-scripts allow-same-origin allow-popups'
+                }
+                style={{
+                  width: '100%',
+                  height: tab.id === 'hk' ? 'calc(100vh - 160px)' : 'calc(100vh - 120px)',
+                  border: 'none',
+                }}
+                onError={() => handleIframeError(tab.id, tab.fallbackUrl)}
+              />
+            )}
           </div>
         ))}
       </div>
