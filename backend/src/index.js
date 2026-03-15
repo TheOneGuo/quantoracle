@@ -5,6 +5,7 @@
  */
 
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
@@ -15,6 +16,29 @@ const TradingRules = require('./rules/trading');
 const AlertSystem = require('./alerts');
 const FeishuNotifier = require('./notifiers/feishu');
 const Database = require('./db');
+
+/**
+ * 根据运行环境动态加载核心算法服务
+ * - 开发环境（NODE_ENV !== 'production'）：直接加载源码（便于调试）
+ * - 生产环境（NODE_ENV === 'production'）：加载 dist/services/ 下的混淆版本
+ *
+ * 注意：dist/ 目录需要在启动前通过 npm run build:core 生成
+ */
+function loadCoreService(serviceName) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const basePath = isProd
+    ? path.join(__dirname, '../../dist/services', serviceName)
+    : path.join(__dirname, './services', serviceName);
+
+  // 生产环境检查混淆文件是否存在
+  if (isProd && !require('fs').existsSync(basePath + '.js')) {
+    console.error(`[启动错误] 混淆文件不存在: ${basePath}.js`);
+    console.error('请先运行 npm run build:core 生成混淆版本');
+    process.exit(1);
+  }
+
+  return require(basePath);
+}
 const SmartAnalyzer = require('./analyzer/smart');
 
 /** 单用户模式下统一使用的用户ID，避免硬编码散落在各路由 */
@@ -2945,7 +2969,7 @@ cron.schedule('1 0 1 * *', async () => {
       WHERE sub.month = ? AND sub.status = 'active'
     `, [lastMonth]);
 
-    const { calcInitialPrice, getCurrentCommissionRate } = require('./services/pricing-engine');
+    const { calcInitialPrice, getCurrentCommissionRate } = loadCoreService('pricing-engine');
 
     for (const { publisher_id } of publishers) {
       try {
@@ -3078,7 +3102,7 @@ cron.schedule('1 0 1 * *', async () => {
     // =========================================================
     console.log('[M5-RatingCron] 开始发布者综合评级月度重置...');
     try {
-      const { monthlyReset } = require('./services/publisher-rating');
+      const { monthlyReset } = loadCoreService('publisher-rating');
       await monthlyReset(db);
       console.log('[M5-RatingCron] 发布者综合评级月度重置完成');
     } catch (e) {

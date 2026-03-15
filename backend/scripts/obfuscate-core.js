@@ -78,3 +78,15 @@ for (const relPath of PROTECTED_FILES) {
 
 console.log(`\n混淆完成：${successCount}/${PROTECTED_FILES.length} 个文件`);
 console.log('生产环境请使用 dist/services/ 下的文件');
+
+// 混淆完成后追加生成聚合文件
+const aggregatorContent = `// 此文件由 obfuscate-core.js 自动生成，勿手动修改
+// 生成时间：${new Date().toISOString()}
+module.exports = {
+  pricingEngine: require('./pricing-engine'),
+  creditScorer: require('./credit-scorer'),
+  publisherRating: require('./publisher-rating'),
+  stockScorer: require('./stock-scorer'),
+};`;
+fs.writeFileSync(path.join(distDir, 'index.js'), aggregatorContent, 'utf8');
+console.log('[完成] dist/services/index.js 聚合入口已生成');
