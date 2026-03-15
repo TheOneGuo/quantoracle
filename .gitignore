@@ -36,3 +36,6 @@ logs/
 # Telegram session files
 *.session
 tg_session*
+
+# 核心算法混淆产物（生产部署用，不入库）
+backend/dist/
