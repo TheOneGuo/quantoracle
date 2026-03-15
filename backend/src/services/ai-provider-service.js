@@ -366,4 +366,44 @@ class AIProviderService {
   }
 }
 
-module.exports = { AIProviderService, maskApiKey };
+/**
+ * AI 提供商预设配置
+ * 用户可通过 AI 引擎管理中心一键载入这些预设，无需手动填写
+ */
+const PROVIDER_PRESETS = [
+  {
+    name: 'OpenRouter（推荐）',
+    provider_type: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    required_fields: ['api_key'],
+    required_field_labels: { api_key: 'OpenRouter API Key' },
+    models: [
+      { model_id: 'stepfun/step-3.5-flash:free', display_name: 'StepFun Flash（免费）', tier: 'free', token_cost_per_1k: 0 },
+      { model_id: 'google/gemini-flash-1.5:free', display_name: 'Gemini Flash 1.5（免费）', tier: 'free', token_cost_per_1k: 0 },
+      { model_id: 'anthropic/claude-3-haiku', display_name: 'Claude 3 Haiku', tier: 'standard', token_cost_per_1k: 0.25 },
+    ],
+    description: '统一接入多家模型，含大量免费模型，推荐首选',
+  },
+  {
+    name: 'StepFun阶跃星辰',
+    provider_type: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    required_fields: ['api_key'],
+    required_field_labels: { api_key: 'OpenRouter API Key' },
+    models: [
+      { model_id: 'stepfun/step-3.5-flash:free', display_name: 'Step-3.5-Flash（免费）', tier: 'free', token_cost_per_1k: 0 },
+    ],
+    description: '阶跃星辰 Step-3.5-Flash 免费模型，速度快，适合高频分析',
+  },
+  {
+    name: 'Ollama 本地推理',
+    provider_type: 'ollama',
+    base_url: 'http://localhost:11434/v1',
+    required_fields: [],
+    required_field_labels: {},
+    models: [],
+    description: '本地部署，零成本，模型需提前下载',
+  },
+];
+
+module.exports = { AIProviderService, maskApiKey, PROVIDER_PRESETS };
