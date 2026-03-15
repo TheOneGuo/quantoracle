@@ -465,6 +465,125 @@ class Database {
     `);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_broker_holdings_user ON broker_holdings(user_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_broker_challenges_user ON broker_challenges(user_id)`);
+
+    // ─── 模拟盘验证系统 M1 ───────────────────────────────────────────────
+
+    // 模拟盘测试主表：记录每次模拟盘测试的全生命周期状态
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sim_trading_sessions (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        initial_capital REAL NOT NULL,          -- 初始资金（元）
+        current_cash REAL NOT NULL,             -- 当前可用现金
+        current_holdings_value REAL DEFAULT 0,  -- 当前持仓市值
+        total_assets REAL NOT NULL,             -- 总资产 = 现金 + 持仓市值
+        start_date DATE NOT NULL,               -- 模拟开始日期
+        end_date DATE,                          -- 模拟结束日期（30天后或中止）
+        status TEXT DEFAULT 'running',          -- running/completed/aborted/violation_stopped
+        final_score REAL,                       -- 30天综合评分（0-100）
+        suggested_grade TEXT,                   -- 评级 S/A/B/C/D
+        suggested_price_monthly REAL,           -- 建议月订阅价（元）
+        suggested_price_annual REAL,            -- 建议年订阅价（元）
+        suggested_price_per_signal REAL,        -- 建议单信号价（元）
+        total_trades INTEGER DEFAULT 0,         -- 累计成交笔数
+        violation_count INTEGER DEFAULT 0,      -- 累计违规次数
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 策略信号记录：每日09:25策略引擎写入，作为合规交易的唯一凭证
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sim_signals (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        stock_code TEXT NOT NULL,               -- 6位股票代码
+        stock_name TEXT,                        -- 股票中文名称
+        signal_type TEXT NOT NULL,              -- buy/add/reduce/sell/stop_loss/stop_profit/clear
+        signal_time DATETIME NOT NULL,          -- 信号产生时间
+        signal_price REAL,                      -- 信号参考价格（元）
+        target_position_pct REAL,               -- 目标仓位比例（0.0-1.0）
+        trigger_reason TEXT,                    -- JSON：触发信号时的量化指标快照
+        is_executed INTEGER DEFAULT 0,          -- 是否已执行（0/1）
+        executed_at DATETIME,                   -- 实际执行时间
+        expires_at DATETIME,                    -- 信号有效期（当日15:00收盘）
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 模拟交易记录：每笔交易完整审计，违规操作也会记录（violation_flag=1）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sim_trades (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        signal_id TEXT,                         -- 关联的策略信号ID（违规操作为NULL）
+        stock_code TEXT NOT NULL,
+        stock_name TEXT,
+        action TEXT NOT NULL,                   -- buy/sell/add/reduce
+        quantity INTEGER NOT NULL,              -- 成交数量（股）
+        price REAL NOT NULL,                    -- 成交价格（元）
+        amount REAL NOT NULL,                   -- 成交金额（元）
+        commission REAL DEFAULT 0,              -- 佣金（元）
+        stamp_duty REAL DEFAULT 0,              -- 印花税（元，仅卖出）
+        slippage REAL DEFAULT 0,               -- 滑点成本（元）
+        net_amount REAL NOT NULL,              -- 净成交金额（含所有费用）
+        is_strategy_driven INTEGER DEFAULT 1,   -- 是否策略驱动（0=手动）
+        violation_flag INTEGER DEFAULT 0,       -- 违规标记（0=合规/1=违规被拒）
+        reject_reason TEXT,                     -- 拒绝原因（违规时填写）
+        trade_time DATETIME NOT NULL,           -- 交易时间
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 每日持仓快照：收盘后（15:05）自动生成，用于绩效计算和回测
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sim_daily_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        snapshot_date DATE NOT NULL,            -- 快照日期
+        total_assets REAL NOT NULL,             -- 当日收盘总资产
+        cash REAL NOT NULL,                     -- 可用现金
+        holdings_value REAL NOT NULL,           -- 持仓市值
+        daily_pnl REAL,                         -- 当日盈亏（元）
+        daily_return_pct REAL,                  -- 当日收益率（小数，保留4位）
+        cumulative_return_pct REAL,             -- 累计收益率（小数，保留4位）
+        max_drawdown_pct REAL,                  -- 截至当日最大回撤（小数，保留4位）
+        holdings_json TEXT,                     -- 持仓明细JSON快照
+        benchmark_return_pct REAL,              -- 基准（沪深300）同期收益率
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, snapshot_date)
+      )
+    `);
+
+    // 模拟持仓（实时）：盘中每分钟更新市值和浮盈浮亏
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sim_holdings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        stock_code TEXT NOT NULL,
+        stock_name TEXT,
+        quantity INTEGER NOT NULL,              -- 持有数量（股）
+        avg_cost REAL NOT NULL,                 -- 持仓均价（元）
+        current_price REAL,                     -- 最新价格（元）
+        market_value REAL,                      -- 持仓市值（元）
+        unrealized_pnl REAL,                    -- 浮动盈亏（元）
+        unrealized_pnl_pct REAL,                -- 浮动盈亏率（小数，保留4位）
+        position_weight REAL,                   -- 仓位占比（小数，保留4位）
+        hold_days INTEGER DEFAULT 0,            -- 持仓天数
+        first_buy_time DATETIME,                -- 首次建仓时间
+        last_trade_time DATETIME,               -- 最近交易时间
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, stock_code)
+      )
+    `);
+
+    // 建立索引提升查询效率
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_strategy ON sim_trading_sessions(strategy_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON sim_trading_sessions(user_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_signals_session ON sim_signals(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_trades_session ON sim_trades(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_snapshots_session ON sim_daily_snapshots(session_id)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_holdings_session ON sim_holdings(session_id)`);
   }
 
   /**
