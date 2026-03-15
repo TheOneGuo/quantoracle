@@ -6,6 +6,26 @@
 
 const db = require('../db');
 
+/**
+ * 从环境变量加载权重配置
+ * 生产环境必须在 .env 中配置真实权重，否则使用混淆默认值
+ * 权重精确值属于平台核心机密，不出现在代码仓库中
+ */
+function loadWeights() {
+  return {
+    // 调价维度权重（从环境变量读取，默认值为占位值）
+    price:       parseFloat(process.env.COEFF_A || '0.25'),
+    subCount:    parseFloat(process.env.COEFF_B || '0.25'),
+    subSpeed:    parseFloat(process.env.COEFF_C || '0.25'),
+    reviewSpeed: parseFloat(process.env.COEFF_D || '0.25'),
+    // 调价曲线形态参数
+    adjMin:      parseFloat(process.env.CURVE_GAMMA || '3'),
+    adjRange:    parseFloat(process.env.CURVE_DELTA || '7'),
+    adjPower:    parseFloat(process.env.CURVE_ALPHA || '1.5'),
+    dimPower:    parseFloat(process.env.CURVE_BETA  || '0.5'),
+  };
+}
+
 // ============================================================
 // 定价常量配置
 // ============================================================
@@ -128,20 +148,22 @@ function dimScore(p, direction) {
  * @returns {number} 调价幅度（%，保留1位小数，范围3%-10%）
  */
 function calcAdjustmentPct(percentiles, direction) {
-  // 各维度权重（合计100%）：定价位置最能反映初始竞争力，权重最高
+  // 从环境变量加载权重配置（各维度权重合计100%）
+  const w = loadWeights();
   const weights = {
-    price:       0.30, // 原始定价分位
-    subCount:    0.25, // 总订阅数分位
-    subSpeed:    0.25, // 近30天增速分位
-    reviewSpeed: 0.20, // 评价达成速度分位
+    price:       w.price,       // 原始定价分位
+    subCount:    w.subCount,    // 总订阅数分位
+    subSpeed:    w.subSpeed,    // 近30天增速分位
+    reviewSpeed: w.reviewSpeed, // 评价达成速度分位
   };
 
-  // 第一层：各维度得分（0-10分，边际递减）
+  // 第一层：各维度得分（0-10分，边际递减，幂次从环境变量读取）
+  const dp = w.dimPower;
   const scores = {
-    price:       dimScore(percentiles.pricePct,       direction),
-    subCount:    dimScore(percentiles.subCountPct,    direction),
-    subSpeed:    dimScore(percentiles.subSpeedPct,    direction),
-    reviewSpeed: dimScore(percentiles.reviewSpeedPct, direction),
+    price:       10 * Math.pow(direction === 'up' ? percentiles.pricePct       : (1 - percentiles.pricePct),       dp),
+    subCount:    10 * Math.pow(direction === 'up' ? percentiles.subCountPct    : (1 - percentiles.subCountPct),    dp),
+    subSpeed:    10 * Math.pow(direction === 'up' ? percentiles.subSpeedPct    : (1 - percentiles.subSpeedPct),    dp),
+    reviewSpeed: 10 * Math.pow(direction === 'up' ? percentiles.reviewSpeedPct : (1 - percentiles.reviewSpeedPct), dp),
   };
 
   // 第二层：加权合成综合得分（0-10分）
@@ -151,8 +173,8 @@ function calcAdjustmentPct(percentiles, direction) {
     scores.subSpeed    * weights.subSpeed +
     scores.reviewSpeed * weights.reviewSpeed;
 
-  // 第三层：平滑曲线映射调价幅度（最小3%，最大10%，指数1.5使高分段上翘）
-  const pct = 3 + 7 * Math.pow(composite / 10, 1.5);
+  // 第三层：平滑曲线映射调价幅度（从环境变量读取参数）
+  const pct = w.adjMin + w.adjRange * Math.pow(composite / 10, w.adjPower);
 
   return Math.round(pct * 10) / 10; // 保留1位小数
 }

@@ -7,6 +7,26 @@
 'use strict';
 
 /**
+ * 从环境变量加载选股评分引擎权重配置
+ * 生产环境必须在 .env 中配置真实权重，否则使用混淆默认值
+ * 权重精确值属于平台核心机密，不出现在代码仓库中
+ */
+function loadScorerWeights() {
+  return {
+    technical:   parseFloat(process.env.RANK_W1 || '0.20'),
+    fundamental: parseFloat(process.env.RANK_W2 || '0.20'),
+    sentiment:   parseFloat(process.env.RANK_W3 || '0.20'),
+    capital:     parseFloat(process.env.RANK_W4 || '0.20'),
+    chip:        parseFloat(process.env.RANK_W5 || '0.20'),
+    // 评级阈值
+    gradeS: parseFloat(process.env.RANK_G1 || '85'),
+    gradeA: parseFloat(process.env.RANK_G2 || '70'),
+    gradeB: parseFloat(process.env.RANK_G3 || '55'),
+    gradeC: parseFloat(process.env.RANK_G4 || '40'),
+  };
+}
+
+/**
  * 限制数值在 [min, max] 区间内
  */
 function clamp(value, min = 0, max = 100) {

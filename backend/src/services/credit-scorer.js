@@ -8,28 +8,55 @@
 
 const db = require('../db');
 
+/**
+ * 从环境变量加载信用评级权重配置
+ * 生产环境必须在 .env 中配置真实权重，否则使用混淆默认值
+ * 权重精确值属于平台核心机密，不出现在代码仓库中
+ */
+function loadCreditWeights() {
+  return {
+    responseRate: parseFloat(process.env.EVL_P  || '0.25'),
+    riskControl:  parseFloat(process.env.EVL_Q  || '0.25'),
+    performance:  parseFloat(process.env.EVL_R  || '0.25'),
+    reputation:   parseFloat(process.env.EVL_S  || '0.25'),
+    // 评级阈值
+    gradeSPlus:   parseFloat(process.env.EVL_T1 || '85'),
+    gradeS:       parseFloat(process.env.EVL_T2 || '70'),
+    gradeAPlus:   parseFloat(process.env.EVL_T3 || '60'),
+    gradeA:       parseFloat(process.env.EVL_T4 || '50'),
+    gradeB:       parseFloat(process.env.EVL_T5 || '40'),
+    gradeC:       parseFloat(process.env.EVL_T6 || '30'),
+  };
+}
+
 // ============================================================
 // 常量配置
 // ============================================================
 
-/** 各子维度权重（合计100%） */
-const WEIGHTS = {
-  execRate:    0.40, // 执行响应率
-  riskControl: 0.25, // 风险控制
-  returnPerf:  0.20, // 盈利表现
-  reputation:  0.15, // 用户口碑
-};
+/** 各子维度权重（从环境变量加载，此处仅为结构占位） */
+const WEIGHTS = (() => {
+  const w = loadCreditWeights();
+  return {
+    execRate:    w.responseRate, // 执行响应率
+    riskControl: w.riskControl,  // 风险控制
+    returnPerf:  w.performance,  // 盈利表现
+    reputation:  w.reputation,   // 用户口碑
+  };
+})();
 
-/** 综合得分 → 信用评级映射 */
-const GRADE_MAP = [
-  { minScore: 90, grade: 'S+' },
-  { minScore: 80, grade: 'S'  },
-  { minScore: 70, grade: 'A+' },
-  { minScore: 60, grade: 'A'  },
-  { minScore: 50, grade: 'B'  },
-  { minScore: 40, grade: 'C'  },
-  { minScore:  0, grade: 'D'  },
-];
+/** 综合得分 → 信用评级映射（阈值从环境变量加载） */
+const GRADE_MAP = (() => {
+  const w = loadCreditWeights();
+  return [
+    { minScore: w.gradeSPlus, grade: 'S+' },
+    { minScore: w.gradeS,     grade: 'S'  },
+    { minScore: w.gradeAPlus, grade: 'A+' },
+    { minScore: w.gradeA,     grade: 'A'  },
+    { minScore: w.gradeB,     grade: 'B'  },
+    { minScore: w.gradeC,     grade: 'C'  },
+    { minScore: 0,            grade: 'D'  },
+  ];
+})();
 
 // ============================================================
 // 各子维度评分函数

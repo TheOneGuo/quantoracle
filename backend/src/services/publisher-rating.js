@@ -20,6 +20,21 @@
 
 'use strict';
 
+/**
+ * 从环境变量加载发布者综合评级权重配置
+ * 生产环境必须在 .env 中配置真实权重，否则使用混淆默认值
+ * 权重精确值属于平台核心机密，不出现在代码仓库中
+ */
+function loadPubRatingWeights() {
+  return {
+    strategyCount: parseFloat(process.env.DIM_X1 || '0.20'),
+    initialPrice:  parseFloat(process.env.DIM_X2 || '0.20'),
+    reviewRatio:   parseFloat(process.env.DIM_X3 || '0.20'),
+    pricingDir:    parseFloat(process.env.DIM_X4 || '0.20'),
+    refundSpeed:   parseFloat(process.env.DIM_X5 || '0.20'),
+  };
+}
+
 /** 评级与额度映射表（按得分从高到低排列，find() 返回第一个满足条件的）*/
 const GRADE_MAP = [
   { min: 90, grade: 'S+', quota: -1 }, // -1 表示不限额
@@ -197,8 +212,9 @@ async function calcAndSaveRating(db, publisherId) {
   // 计算各维度分位值
   const percentiles = await calcPercentiles(db, publisherId);
 
-  // 内部权重（不对外公开）
-  const weights = { d1: 0.20, d2: 0.15, d3: 0.25, d4: 0.20, d5: 0.20 };
+  // 内部权重从环境变量加载（不对外公开）
+  const pw = loadPubRatingWeights();
+  const weights = { d1: pw.strategyCount, d2: pw.initialPrice, d3: pw.reviewRatio, d4: pw.pricingDir, d5: pw.refundSpeed };
 
   // 边际递减得分：每个维度 0-10 分
   const scores = {
