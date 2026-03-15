@@ -102,6 +102,10 @@ app.post('/api/auth/logout', (req, res) => {
 const brokerRoutes = require('./broker/broker-routes');
 app.use('/api/broker', authRequired, brokerRoutes);
 
+// 视频OCR实盘数据识别路由（一期：同花顺/东方财富）
+const brokerVideoRoutes = require('./broker/broker-video-routes');
+app.use('/api/broker', authRequired, brokerVideoRoutes);
+
 /**
  * 计算持仓汇总信息
  */
