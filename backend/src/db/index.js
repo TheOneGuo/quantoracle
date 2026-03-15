@@ -776,6 +776,24 @@ class Database {
       )
     `);
 
+    // 发布者综合评级表：5维度评分、月度发布额度、D级解禁日期
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS publisher_ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publisher_id TEXT NOT NULL,           -- 发布者用户ID
+        grade TEXT NOT NULL,                  -- 评级：S+/S/A/B/C/D
+        score REAL NOT NULL,                  -- 综合得分 0-100
+        dim_percentiles TEXT NOT NULL,        -- 各维度分位值 JSON
+        dim_scores TEXT NOT NULL,             -- 各维度得分 JSON
+        monthly_quota INTEGER NOT NULL,       -- 当月发布额度（-1=不限，0=禁止）
+        monthly_published INTEGER DEFAULT 0,  -- 当月已发布数量
+        quota_reset_date DATE,                -- 额度重置日期（每月1日）
+        d_grade_unban_date DATE,              -- D级解禁日期（3个月后）
+        calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- 最近计算时间
+        UNIQUE(publisher_id)
+      )
+    `);
+
     // 建立索引提升查询效率
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_strategy ON sim_trading_sessions(strategy_id)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON sim_trading_sessions(user_id)`);

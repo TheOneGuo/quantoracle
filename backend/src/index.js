@@ -3072,6 +3072,18 @@ cron.schedule('1 0 1 * *', async () => {
     } catch (e) {
       console.error('[M4-StatsCron] 策略执行统计出错:', e.message);
     }
+
+    // =========================================================
+    // M5 扩展：发布者综合评级月度重置与重新计算
+    // =========================================================
+    console.log('[M5-RatingCron] 开始发布者综合评级月度重置...');
+    try {
+      const { monthlyReset } = require('./services/publisher-rating');
+      await monthlyReset(db);
+      console.log('[M5-RatingCron] 发布者综合评级月度重置完成');
+    } catch (e) {
+      console.error('[M5-RatingCron] 发布者综合评级月度重置出错:', e.message);
+    }
   } catch (err) {
     console.error('[M3-SettleCron] 月度结算任务出错:', err.message);
   }
