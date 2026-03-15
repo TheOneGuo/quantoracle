@@ -616,6 +616,172 @@ app.get('/api/kline/:code', async (req, res) => {
   }
 });
 
+/**
+ * 获取股票基本面数据（PE/PB/ROE/净利润等）
+ * 通过东方财富/新浪接口获取真实财务数据
+ * @route GET /api/fundamental/:code
+ */
+app.get('/api/fundamental/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    
+    // 提取纯数字代码（去掉 sh/sz 前缀），用于东方财富接口
+    const pureCode = code.replace(/^(sh|sz)/i, '');
+    const market = code.startsWith('sh') ? '1' : '0'; // 东方财富：1=上交所,0=深交所
+    
+    // 东方财富个股基本信息接口（包含PE/PB/总市值等）
+    const infoUrl = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${pureCode}&fields=f57,f58,f162,f167,f173,f182,f183,f9,f115,f114`;
+    
+    const resp = await axios.get(infoUrl, {
+      timeout: 8000,
+      headers: { 'Referer': 'https://quote.eastmoney.com/' }
+    });
+    
+    const d = resp.data && resp.data.data;
+    if (d) {
+      // 字段说明：f162=PE(动态), f167=PB, f173=ROE, f9=涨跌幅
+      // f114=总市值(元), f115=流通市值
+      const fundamental = {
+        code: code,
+        name: d.f58 || '',
+        // PE 和 PB（东方财富返回值已是小数，除以100得到百分比）
+        pe_dynamic: d.f162 !== '-' && d.f162 ? parseFloat((d.f162 / 100).toFixed(2)) : null,
+        pb: d.f167 !== '-' && d.f167 ? parseFloat((d.f167 / 100).toFixed(2)) : null,
+        // ROE（净资产收益率）
+        roe: d.f173 !== '-' && d.f173 ? parseFloat((d.f173 / 100).toFixed(2)) : null,
+        // 市值（亿元）
+        total_market_cap: d.f114 ? parseFloat((d.f114 / 1e8).toFixed(2)) : null,
+        circulating_market_cap: d.f115 ? parseFloat((d.f115 / 1e8).toFixed(2)) : null,
+        // 股息率
+        dividend_yield: d.f183 !== '-' && d.f183 ? parseFloat((d.f183 / 100).toFixed(2)) : null,
+        // 净利润同比增长
+        net_profit_yoy: d.f182 !== '-' && d.f182 ? parseFloat((d.f182 / 100).toFixed(2)) : null,
+        source: '东方财富',
+        timestamp: new Date().toISOString()
+      };
+      return res.json({ success: true, data: fundamental });
+    }
+    
+    // 若东方财富接口无数据，返回基础信息提示
+    res.json({ success: false, error: '暂无基本面数据' });
+  } catch (error) {
+    console.error('[/api/fundamental]', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 获取个股资金流向数据
+ * 通过东方财富接口获取主力/超大单/大单/中单/小单资金流向
+ * @route GET /api/capital-flow/:code
+ */
+app.get('/api/capital-flow/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    const { days = 5 } = req.query; // 获取最近N天的数据
+    
+    const pureCode = code.replace(/^(sh|sz)/i, '');
+    const market = code.startsWith('sh') ? '1' : '0';
+    
+    // 东方财富个股资金流向接口
+    // lmt=10 最多返回10天，klt=101=日线
+    const url = `https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=${days}&klt=101&secid=${market}.${pureCode}&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65`;
+    
+    const resp = await axios.get(url, {
+      timeout: 8000,
+      headers: { 'Referer': 'https://quote.eastmoney.com/' }
+    });
+    
+    const rawData = resp.data && resp.data.data && resp.data.data.klines;
+    
+    if (rawData && rawData.length > 0) {
+      // 字段顺序：日期,主力净额,超大单净额,大单净额,中单净额,小单净额,
+      //           主力净比,超大单净比,大单净比,中单净比,小单净比
+      const items = rawData.map(line => {
+        const f = line.split(',');
+        return {
+          date: f[0],
+          // 净额（万元）
+          main_net:       parseFloat(f[1]) || 0,  // 主力净流入
+          super_large_net: parseFloat(f[2]) || 0,  // 超大单
+          large_net:      parseFloat(f[3]) || 0,  // 大单
+          mid_net:        parseFloat(f[4]) || 0,  // 中单
+          small_net:      parseFloat(f[5]) || 0,  // 小单
+          // 净比（%）
+          main_pct:       parseFloat(f[6]) || 0,
+          super_large_pct: parseFloat(f[7]) || 0,
+          large_pct:      parseFloat(f[8]) || 0,
+          mid_pct:        parseFloat(f[9]) || 0,
+          small_pct:      parseFloat(f[10]) || 0,
+        };
+      });
+      
+      // 汇总最新一天
+      const latest = items[items.length - 1] || {};
+      const summary = {
+        main_net_total: items.reduce((s, d) => s + d.main_net, 0),
+        main_trend: latest.main_net > 0 ? '净流入' : '净流出',
+        latest_date: latest.date || ''
+      };
+      
+      return res.json({ success: true, data: { code, items, summary, source: '东方财富' } });
+    }
+    
+    // 兜底：返回空数据提示
+    res.json({ success: true, data: { code, items: [], summary: {}, source: '东方财富', note: '暂无资金流向数据' } });
+  } catch (error) {
+    console.error('[/api/capital-flow]', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 获取个股筹码分布数据
+ * 通过东方财富获筹码分布（成本分布）
+ * @route GET /api/chip-distribution/:code
+ */
+app.get('/api/chip-distribution/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    const pureCode = code.replace(/^(sh|sz)/i, '');
+    const market = code.startsWith('sh') ? '1' : '0';
+    
+    // 东方财富筹码分布接口
+    const url = `https://push2.eastmoney.com/api/qt/stock/cyq/get?secid=${market}.${pureCode}&fields=f61,f62,f63,f64,f65`;
+    
+    const resp = await axios.get(url, {
+      timeout: 8000,
+      headers: { 'Referer': 'https://quote.eastmoney.com/' }
+    });
+    
+    const d = resp.data && resp.data.data;
+    if (d) {
+      // f61=获利比例, f62=平均成本, f63=90%集中度, f64=主力成本, f65=散户成本
+      const chipData = {
+        code: code,
+        // 获利盘比例（%），即当前价格以下的筹码占比
+        profit_ratio: d.f61 !== null && d.f61 !== undefined ? parseFloat((d.f61 / 100).toFixed(2)) : null,
+        // 平均持仓成本（元）
+        avg_cost: d.f62 !== null && d.f62 !== undefined ? parseFloat((d.f62 / 100).toFixed(2)) : null,
+        // 90%筹码集中区间（元）
+        concentration_90: d.f63 !== null && d.f63 !== undefined ? parseFloat((d.f63 / 100).toFixed(2)) : null,
+        // 主力成本
+        main_cost: d.f64 !== null && d.f64 !== undefined ? parseFloat((d.f64 / 100).toFixed(2)) : null,
+        // 散户成本
+        retail_cost: d.f65 !== null && d.f65 !== undefined ? parseFloat((d.f65 / 100).toFixed(2)) : null,
+        source: '东方财富',
+        timestamp: new Date().toISOString()
+      };
+      return res.json({ success: true, data: chipData });
+    }
+    
+    res.json({ success: false, error: '暂无筹码分布数据' });
+  } catch (error) {
+    console.error('[/api/chip-distribution]', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 启动服务器（支持 WebSocket）
 const PORT = process.env.PORT || 3001;
 const http = require('http');
