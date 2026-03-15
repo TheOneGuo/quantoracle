@@ -435,4 +435,126 @@ router.get('/subscription/status/:strategyId', async (req, res) => {
   }
 });
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 新增：退款保护 / 封禁状态 / 终身升级 / 我的订阅列表
+// ─────────────────────────────────────────────────────────────────────────────
+const refundGuard = require('../services/refund-guard');
+
+/**
+ * POST /api/subscription/early-refund
+ * 7日内退款申请
+ * body: { subscriptionId: number }
+ */
+router.post('/subscription/early-refund', async (req, res) => {
+  try {
+    const db = req.app.locals.dbWrapper;
+    const userId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!userId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const { subscriptionId } = req.body;
+    if (!subscriptionId) return res.status(400).json({ success: false, error: '缺少 subscriptionId' });
+
+    const result = await refundGuard.processEarlyRefund(db, userId, subscriptionId);
+    if (!result.approved) {
+      return res.status(400).json({ success: false, error: result.reason });
+    }
+
+    res.json({ success: true, refundAmount: result.refundAmount, message: result.reason });
+  } catch (err) {
+    console.error('[marketplace] early-refund error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/subscription/ban-status
+ * 查询当前用户的封禁状态
+ */
+router.get('/subscription/ban-status', async (req, res) => {
+  try {
+    const db = req.app.locals.dbWrapper;
+    const userId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!userId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const status = await refundGuard.checkUserBanStatus(db, userId);
+    res.json({ success: true, data: status });
+  } catch (err) {
+    console.error('[marketplace] ban-status error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/subscription/accept-upgrade
+ * 用户接受终身升级弹窗（月订阅→终身6折）
+ * body: { strategyId: number }
+ */
+router.post('/subscription/accept-upgrade', async (req, res) => {
+  try {
+    const db = req.app.locals.dbWrapper;
+    const subscriberId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!subscriberId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const { strategyId } = req.body;
+    if (!strategyId) return res.status(400).json({ success: false, error: '缺少 strategyId' });
+
+    const result = await subscriptionManager.acceptLifetimeUpgrade(db, subscriberId, strategyId);
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[marketplace] accept-upgrade error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/subscription/my
+ * 我的所有订阅（含状态/宽限期/连续月数）
+ */
+router.get('/subscription/my', async (req, res) => {
+  try {
+    const db = req.app.locals.dbWrapper;
+    const subscriberId = req.headers['x-subscriber-id'] || req.session?.userId;
+    if (!subscriberId) return res.status(401).json({ success: false, error: '未授权：请先登录' });
+
+    const subscriptions = await new Promise((resolve, reject) => {
+      db.db.all(
+        `SELECT s.*, st.name as strategy_name, st.description as strategy_desc
+         FROM subscriptions s
+         LEFT JOIN strategies st ON st.id = s.strategy_id
+         WHERE s.subscriber_id = ?
+         ORDER BY s.started_at DESC`,
+        [subscriberId],
+        (err, rows) => err ? reject(err) : resolve(rows || [])
+      );
+    });
+
+    // 为每条订阅计算当前激活状态
+    const now = new Date();
+    const enriched = subscriptions.map(sub => {
+      const isLifetime = sub.sub_type === 'lifetime';
+      const isActive = isLifetime
+        ? true
+        : (sub.expires_at && new Date(sub.expires_at) > now);
+      const inGrace = !isActive && sub.grace_end_at && new Date(sub.grace_end_at) > now;
+
+      return {
+        ...sub,
+        isActive: isActive || inGrace,
+        inGrace: !!inGrace,
+      };
+    });
+
+    res.json({ success: true, data: enriched });
+  } catch (err) {
+    console.error('[marketplace] subscription/my error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

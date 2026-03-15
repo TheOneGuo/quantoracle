@@ -51,6 +51,7 @@ const alertSystem = new AlertSystem();
 const feishu = new FeishuNotifier();
 const db = new Database();
 app.locals.db = db.db; // 将原始 SQLite db 实例挂到 app.locals，供 broker-routes 使用
+app.locals.dbWrapper = db; // 暴露 Database 包装器实例，供对账/提现等服务使用
 
 app.use(cors());
 app.use(express.json());
@@ -148,6 +149,10 @@ app.use('/api/strategy', strategyRulesRouter);
 app.use('/api', executionHistoryRouter);
 app.use('/api/marketplace', marketplaceRouter);
 app.use('/api', publisherRatingRouter);
+
+// 注册发布者对账与管理后台路由
+app.use('/api/publisher', require('./api/publisher-ledger'));
+app.use('/api/admin', require('./api/admin-subscriptions'));
 
 /**
  * 计算持仓汇总信息
@@ -2955,6 +2960,35 @@ cron.schedule('25 9 * * 1-5', async () => {
     console.log(`[M3-T1Cron] T+1顺延信号处理完成，共 ${t1Signals.length} 条`);
   } catch (err) {
     console.error('[M3-T1Cron] T+1顺延任务出错:', err.message);
+  }
+}, { timezone: 'Asia/Shanghai' });
+
+/**
+ * 每天凌晨1点：解冻T+7到期的锁定收入
+ * 将 publisher_ledger 中 lock_until <= now 且 status='pending' 的记录解冻
+ */
+const publisherLedgerService = require('./services/publisher-ledger');
+cron.schedule('0 1 * * *', async () => {
+  console.log('[Cron] 开始执行T+7收入解冻任务...');
+  try {
+    const count = await publisherLedgerService.unlockMaturedFunds(db);
+    console.log(`[Cron] T+7收入解冻完成，共解冻 ${count} 笔`);
+  } catch (err) {
+    console.error('[Cron] T+7收入解冻失败:', err.message);
+  }
+}, { timezone: 'Asia/Shanghai' });
+
+/**
+ * 每天凌晨2点：释放到期保证金（满30天后自动释放）
+ * 将 publisher_withdrawals 中 bond_release_at <= now 且已完成的提现保证金释放回可提现余额
+ */
+cron.schedule('0 2 * * *', async () => {
+  console.log('[Cron] 开始执行保证金释放任务...');
+  try {
+    const count = await publisherLedgerService.releaseMatureBonds(db);
+    console.log(`[Cron] 保证金释放完成，共释放 ${count} 笔`);
+  } catch (err) {
+    console.error('[Cron] 保证金释放失败:', err.message);
   }
 }, { timezone: 'Asia/Shanghai' });
 
