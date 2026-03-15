@@ -419,6 +419,34 @@ async def global_exception_handler(request, exc):
     )
 
 # 启动函数
+@app.post('/industry-benchmarks/refresh')
+async def refresh_industry_benchmarks(force: bool = False):
+    """
+    刷新行业估值基准数据接口
+    
+    优先从缓存读取（7天有效），缓存过期或 force=True 时从 AkShare 重新获取。
+    AkShare 失败时降级使用内置静态数据（is_simulated=True）。
+    
+    供定时任务或管理员手动调用：
+        POST /industry-benchmarks/refresh
+        POST /industry-benchmarks/refresh?force=true
+    """
+    try:
+        from .agents.fundamental import update_industry_benchmarks, INDUSTRY_BENCHMARKS
+        benchmarks = update_industry_benchmarks(force=force)
+        return {
+            'success': True,
+            'industry_count': len(benchmarks),
+            'force': force,
+            'is_simulated': benchmarks == {},
+            'updated_at': datetime.now().isoformat(),
+            'sample': dict(list(benchmarks.items())[:3]),
+        }
+    except Exception as e:
+        logger.error(f'刷新行业基准数据失败: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def start_server(host: str = "0.0.0.0", port: int = 8765):
     """
     启动 FastAPI 服务器

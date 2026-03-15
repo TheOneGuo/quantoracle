@@ -3,9 +3,11 @@
 调用 QuantOracle 后端 /api/stock/:code 获取基本面数据，LLM 分析并输出评分 0-1
 """
 
+import json
 import logging
+import os
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 from ..llm_client import get_llm_client
 from ..data.stock_data import get_stock_data_client
@@ -13,11 +15,11 @@ from ..data.stock_data import get_stock_data_client
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 行业平均估值参考（A股，数据可定期更新）
+# 内置行业平均估值基准（兜底静态数据）
 # pe: 市盈率, pb: 市净率, roe: 净资产收益率(%)
-# 来源：Wind/Choice 行业中位数，每年可更新一次
+# 来源：Wind/Choice 行业中位数，可通过 AkShare 定期自动更新
 # ============================================================
-INDUSTRY_BENCHMARKS = {
+_STATIC_INDUSTRY_BENCHMARKS = {
     "银行":   {"pe": 6,  "pb": 0.7, "roe": 12},
     "证券":   {"pe": 20, "pb": 1.8, "roe": 8},
     "保险":   {"pe": 12, "pb": 1.5, "roe": 10},
@@ -30,13 +32,166 @@ INDUSTRY_BENCHMARKS = {
     "通用":   {"pe": 20, "pb": 2,   "roe": 12},  # 兜底默认值
 }
 
+# 缓存文件路径（相对于项目根目录的 data/ 目录）
+_CACHE_FILE = os.path.join(
+    os.path.dirname(__file__), '..', '..', '..', 'data', 'industry_benchmarks.json'
+)
+_CACHE_MAX_AGE_DAYS = 7  # 缓存有效期（天）
+
+# 内存中的当前基准数据（启动时懒加载）
+INDUSTRY_BENCHMARKS: Dict[str, Dict[str, float]] = {}
+
+
+def _load_benchmarks_from_cache() -> Optional[Dict]:
+    """
+    从缓存文件加载行业基准数据。
+    若文件不存在或超过有效期，返回 None。
+    """
+    cache_path = os.path.abspath(_CACHE_FILE)
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+        if datetime.now() - mtime > timedelta(days=_CACHE_MAX_AGE_DAYS):
+            logger.info('[行业基准] 缓存文件已超过 %d 天，需要更新', _CACHE_MAX_AGE_DAYS)
+            return None
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        logger.info('[行业基准] 从缓存文件加载成功：%s', cache_path)
+        return data.get('benchmarks') or data
+    except Exception as e:
+        logger.warning('[行业基准] 读取缓存文件失败：%s', e)
+        return None
+
+
+def _save_benchmarks_to_cache(benchmarks: Dict) -> None:
+    """将行业基准数据写入缓存文件。"""
+    cache_path = os.path.abspath(_CACHE_FILE)
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(
+                {
+                    'benchmarks': benchmarks,
+                    'updated_at': datetime.now().isoformat(),
+                    'is_simulated': False,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+        logger.info('[行业基准] 缓存文件已更新：%s', cache_path)
+    except Exception as e:
+        logger.warning('[行业基准] 写入缓存文件失败：%s', e)
+
+
+def _fetch_benchmarks_from_akshare() -> Optional[Dict]:
+    """
+    通过 AkShare 获取行业 PE/PB 等估值数据并整合为基准字典。
+    失败时返回 None（降级到静态数据）。
+    """
+    try:
+        import akshare as ak  # 懒导入，避免无 AkShare 时崩溃
+
+        logger.info('[行业基准] 正在从 AkShare 获取最新行业估值数据...')
+
+        # ── 东方财富行业板块数据 ────────────────────────────────────────
+        # stock_board_industry_name_em 返回各行业的涨跌、PE、PB 等字段
+        df = ak.stock_board_industry_name_em()
+
+        # 常见列名映射（AkShare 版本间可能有差异）
+        pe_col  = next((c for c in df.columns if '市盈' in c or 'PE' in c.upper()), None)
+        pb_col  = next((c for c in df.columns if '市净' in c or 'PB' in c.upper()), None)
+        name_col = next((c for c in df.columns if '板块' in c or '名称' in c or '行业' in c), df.columns[0])
+
+        if not pe_col or not pb_col:
+            logger.warning('[行业基准] AkShare 返回数据缺少 PE/PB 列，降级使用静态数据')
+            return None
+
+        benchmarks = {}
+        for _, row in df.iterrows():
+            name = str(row[name_col]).strip()
+            try:
+                pe_val = float(row[pe_col]) if row[pe_col] else None
+                pb_val = float(row[pb_col]) if row[pb_col] else None
+                if pe_val and pb_val and pe_val > 0 and pb_val > 0:
+                    # ROE ≈ 净利润 / 净资产 = PE / PB （粗略估算）
+                    roe_est = round((pb_val / pe_val) * 100, 1) if pe_val > 0 else 12.0
+                    benchmarks[name] = {
+                        'pe': round(pe_val, 1),
+                        'pb': round(pb_val, 2),
+                        'roe': roe_est,
+                    }
+            except (ValueError, TypeError):
+                continue
+
+        # 确保"通用"兜底键存在
+        if '通用' not in benchmarks:
+            benchmarks['通用'] = _STATIC_INDUSTRY_BENCHMARKS['通用']
+
+        logger.info('[行业基准] AkShare 获取成功，共 %d 个行业', len(benchmarks))
+        return benchmarks
+
+    except ImportError:
+        logger.warning('[行业基准] 未安装 akshare，降级使用静态数据')
+        return None
+    except Exception as e:
+        logger.warning('[行业基准] AkShare 调用失败（%s），降级使用静态数据', e)
+        return None
+
+
+def update_industry_benchmarks(force: bool = False) -> Dict:
+    """
+    更新行业基准数据（可手动调用或定时触发）。
+
+    优先级：
+    1. 缓存文件（不超过 7 天）
+    2. AkShare 实时获取
+    3. 内置静态数据（兜底）
+
+    Args:
+        force: True 时跳过缓存，强制重新拉取 AkShare 数据
+
+    Returns:
+        当前使用的行业基准字典
+    """
+    global INDUSTRY_BENCHMARKS
+
+    # 1. 尝试缓存
+    if not force:
+        cached = _load_benchmarks_from_cache()
+        if cached:
+            INDUSTRY_BENCHMARKS = cached
+            return INDUSTRY_BENCHMARKS
+
+    # 2. 尝试 AkShare
+    fetched = _fetch_benchmarks_from_akshare()
+    if fetched:
+        _save_benchmarks_to_cache(fetched)
+        INDUSTRY_BENCHMARKS = fetched
+        return INDUSTRY_BENCHMARKS
+
+    # 3. 兜底：内置静态数据（标记为模拟数据）
+    logger.warning('[行业基准] 降级使用内置静态数据，is_simulated=True')
+    INDUSTRY_BENCHMARKS = dict(_STATIC_INDUSTRY_BENCHMARKS)
+    return INDUSTRY_BENCHMARKS
+
+
+# ── 模块加载时懒初始化 ──────────────────────────────────────────────────────
+def _ensure_loaded():
+    """确保 INDUSTRY_BENCHMARKS 已初始化（首次调用时懒加载）。"""
+    if not INDUSTRY_BENCHMARKS:
+        update_industry_benchmarks(force=False)
+
+
 def _get_industry_benchmark(industry: str) -> Dict[str, float]:
     """
-    根据行业名称获取对应的估值基准。
+    根据行业名称获取对应的估值基准（懒加载）。
     如果行业名称不在预设字典中，关键词模糊匹配，否则返回"通用"基准。
     """
+    _ensure_loaded()
     if not industry or industry == "未知":
-        return INDUSTRY_BENCHMARKS["通用"]
+        return INDUSTRY_BENCHMARKS.get("通用", _STATIC_INDUSTRY_BENCHMARKS["通用"])
     # 精确匹配
     if industry in INDUSTRY_BENCHMARKS:
         return INDUSTRY_BENCHMARKS[industry]
@@ -44,7 +199,7 @@ def _get_industry_benchmark(industry: str) -> Dict[str, float]:
     for key in INDUSTRY_BENCHMARKS:
         if key in industry or industry in key:
             return INDUSTRY_BENCHMARKS[key]
-    return INDUSTRY_BENCHMARKS["通用"]
+    return INDUSTRY_BENCHMARKS.get("通用", _STATIC_INDUSTRY_BENCHMARKS["通用"])
 
 def _compare_with_benchmark(value: Optional[float], benchmark: float, metric: str) -> Dict[str, Any]:
     """
