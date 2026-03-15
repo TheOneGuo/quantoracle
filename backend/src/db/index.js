@@ -385,6 +385,29 @@ class Database {
       )
     `);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_analysis_news_id ON news_analysis(news_id)`);
+
+    // ── 去重日志表（记录每次去重决策，方便审计和调优）
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS news_dedup_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_hash TEXT NOT NULL,          -- MD5哈希
+        source_key TEXT NOT NULL,            -- 来源别名
+        raw_id TEXT,                         -- 原始消息ID
+        content_preview TEXT,                -- 内容前100字（审计用）
+        dedup_method TEXT NOT NULL,          -- 去重方式: exact_hash/jaccard/time_window
+        similarity_score REAL,               -- Jaccard相似度（仅jaccard时有值）
+        duplicate_of_raw_id TEXT,            -- 与哪条消息重复（raw_id）
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_dedup_log_hash ON news_dedup_log(content_hash)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_news_dedup_log_time ON news_dedup_log(created_at)`);
+
+    // ── 迁移 news_processed：新增 sentiment / urgency / channel_type 字段
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN channel_type TEXT DEFAULT 'general'`, () => {});
+    // sentiment 和 urgency 字段在更早的 migration 中可能已存在，这里幂等执行
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN sentiment TEXT DEFAULT '中性'`, () => {});
+    this.db.run(`ALTER TABLE news_processed ADD COLUMN urgency TEXT DEFAULT 'normal'`, () => {});
   }
 
   /**
