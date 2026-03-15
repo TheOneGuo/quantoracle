@@ -97,14 +97,71 @@ function calcInitialPrice(simResult) {
 }
 
 // ============================================================
-// 动态调价
+// 动态调价（三层平滑曲线算法）
 // ============================================================
+
+/**
+ * 计算单个维度得分（边际递减开方函数）
+ * @param {number} p 分位值 0-1（0=最差，1=最优）
+ * @param {'up'|'down'} direction 涨价/降价方向
+ * @returns {number} 0-10分
+ */
+function dimScore(p, direction) {
+  // 涨价方向：分位越高得分越高；降价方向：分位越低（越差）得分越高
+  const v = direction === 'up' ? p : (1 - p);
+  return 10 * Math.pow(v, 0.5); // 开方体现边际递减
+}
+
+/**
+ * 计算AI调价幅度（三层平滑曲线）
+ *
+ * 第一层：各维度分位值 → 维度得分（开方函数，边际递减）
+ * 第二层：4维加权合成综合得分（各维度权重不同）
+ * 第三层：综合得分 → 调价幅度（1.5次幂平滑曲线，高分段上翘）
+ *
+ * @param {Object} percentiles 各维度在同档次策略中的百分位数（0-1）
+ *   pricePct:       原始定价分位（0=最低定价，1=最高定价）
+ *   subCountPct:    当前总订阅数排名分位（0=最少，1=最多）
+ *   subSpeedPct:    近30天订阅增速分位（0=最慢，1=最快）
+ *   reviewSpeedPct: 评价达成速度分位（0=最慢，1=最快）
+ * @param {'up'|'down'} direction 涨价/降价
+ * @returns {number} 调价幅度（%，保留1位小数，范围3%-10%）
+ */
+function calcAdjustmentPct(percentiles, direction) {
+  // 各维度权重（合计100%）：定价位置最能反映初始竞争力，权重最高
+  const weights = {
+    price:       0.30, // 原始定价分位
+    subCount:    0.25, // 总订阅数分位
+    subSpeed:    0.25, // 近30天增速分位
+    reviewSpeed: 0.20, // 评价达成速度分位
+  };
+
+  // 第一层：各维度得分（0-10分，边际递减）
+  const scores = {
+    price:       dimScore(percentiles.pricePct,       direction),
+    subCount:    dimScore(percentiles.subCountPct,    direction),
+    subSpeed:    dimScore(percentiles.subSpeedPct,    direction),
+    reviewSpeed: dimScore(percentiles.reviewSpeedPct, direction),
+  };
+
+  // 第二层：加权合成综合得分（0-10分）
+  const composite =
+    scores.price       * weights.price +
+    scores.subCount    * weights.subCount +
+    scores.subSpeed    * weights.subSpeed +
+    scores.reviewSpeed * weights.reviewSpeed;
+
+  // 第三层：平滑曲线映射调价幅度（最小3%，最大10%，指数1.5使高分段上翘）
+  const pct = 3 + 7 * Math.pow(composite / 10, 1.5);
+
+  return Math.round(pct * 10) / 10; // 保留1位小数
+}
 
 /**
  * 调价评估（净好评满10个 / 净差评满5个后调用）
  * @param {string} strategyId 策略ID
  * @param {'up'|'down'} direction 调价方向（好评→up，差评→down）
- * @returns {Promise<{ direction: string, change_pct: number, reasons: string[], new_price_monthly: number, comparison_scores: Object }>}
+ * @returns {Promise<{ direction: string, change_pct: number, reasons: string[], new_price_monthly: number, comparison_scores: Object, dim_scores: Object }>}
  */
 async function calcPriceAdjustment(strategyId, direction) {
   // 查询当前策略定价
@@ -159,45 +216,84 @@ async function calcPriceAdjustment(strategyId, direction) {
     `, [strategyId], (err, row) => err ? reject(err) : resolve(row));
   });
 
-  // 4个横向对比维度评分（0-100）
-  const avgPrice = tierAvg?.avg_price || currentPricing.price_monthly;
-  const rankPct = subRank?.rank_pct || 0.5;
-  const growthPct = growthRank?.growth_pct || 0.5;
+  // 查询评价达成速度分位（订单从下单到首次好评的时长排名）
+  const reviewSpeedRank = await new Promise((resolve, reject) => {
+    const dbConn = db.getInstance ? db.getInstance() : db;
+    dbConn.get(`
+      SELECT
+        (SELECT COUNT(*) FROM strategies s2
+          LEFT JOIN (
+            SELECT strategy_id,
+              AVG(julianday(r.created_at) - julianday(sub.created_at)) AS avg_days
+            FROM strategy_reviews r
+            JOIN subscriptions sub ON r.strategy_id = sub.strategy_id AND r.reviewer_id = sub.user_id
+            WHERE r.rating >= 4
+            GROUP BY strategy_id
+          ) rs2 ON s2.id = rs2.strategy_id
+          WHERE COALESCE(rs2.avg_days, 999) >= COALESCE(rs.avg_days, 999)
+        ) * 1.0 /
+        (SELECT COUNT(*) FROM strategies) AS review_speed_pct
+      FROM strategies s
+      LEFT JOIN (
+        SELECT strategy_id,
+          AVG(julianday(r.created_at) - julianday(sub.created_at)) AS avg_days
+        FROM strategy_reviews r
+        JOIN subscriptions sub ON r.strategy_id = sub.strategy_id AND r.reviewer_id = sub.user_id
+        WHERE r.rating >= 4
+        GROUP BY strategy_id
+      ) rs ON s.id = rs.strategy_id
+      WHERE s.id=?
+    `, [strategyId], (err, row) => err ? reject(err) : resolve(row));
+  });
 
-  const comparison_scores = {
-    // 维度1：原价 vs 同档均价（低于均价 → 有上调空间，评分高）
-    price_vs_avg: currentPricing.price_monthly <= avgPrice ? 80 : 40,
-    // 维度2：总订阅数排名（前20% → 高评分）
-    sub_rank: rankPct >= 0.8 ? 90 : rankPct >= 0.5 ? 60 : 30,
-    // 维度3：订阅增速分位（超90% → 高评分）
-    growth_rank: growthPct >= 0.9 ? 95 : growthPct >= 0.7 ? 70 : 40,
-    // 维度4：达成周期分位（暂用固定中等分，M5补充实际数据）
-    achieve_speed: 60,
+  // 组装各维度分位值（0-1）
+  const avgPrice = tierAvg?.avg_price || currentPricing.price_monthly;
+  const rankPct    = subRank?.rank_pct              || 0.5;
+  const growthPct  = growthRank?.growth_pct         || 0.5;
+  const reviewSpeedPct = reviewSpeedRank?.review_speed_pct || 0.5;
+
+  // 原始定价分位：当前价格 vs 同档均价，低于均价 → 分位高（有上调空间）
+  const pricePct = currentPricing.price_monthly <= avgPrice
+    ? Math.min(0.5 + (avgPrice - currentPricing.price_monthly) / avgPrice, 1.0)
+    : Math.max(0.5 - (currentPricing.price_monthly - avgPrice) / avgPrice, 0.0);
+
+  const percentiles = {
+    pricePct,
+    subCountPct:    rankPct,
+    subSpeedPct:    growthPct,
+    reviewSpeedPct,
   };
 
-  const avgScore = Object.values(comparison_scores).reduce((a, b) => a + b, 0) / 4;
+  // 调用三层平滑曲线算法计算调价幅度
+  const change_pct = calcAdjustmentPct(percentiles, direction);
 
-  // 根据综合评分和调价方向决定调价幅度（3%-10%）
-  let change_pct;
-  if (direction === 'up') {
-    // 评分越高，涨价幅度越大
-    change_pct = avgScore >= 80 ? 10 : avgScore >= 60 ? 7 : 3;
-  } else {
-    // 差评降价：评分越低，降价幅度越大
-    change_pct = avgScore <= 40 ? 10 : avgScore <= 60 ? 7 : 3;
-  }
+  // 各维度得分明细（供调价报告展示）
+  const dim_scores = {
+    price:       dimScore(pricePct,       direction),
+    subCount:    dimScore(rankPct,        direction),
+    subSpeed:    dimScore(growthPct,      direction),
+    reviewSpeed: dimScore(reviewSpeedPct, direction),
+  };
+
+  // 保留兼容字段 comparison_scores（旧接口兼容）
+  const comparison_scores = {
+    price_vs_avg:  Math.round(dim_scores.price       * 10),
+    sub_rank:      Math.round(dim_scores.subCount    * 10),
+    growth_rank:   Math.round(dim_scores.subSpeed    * 10),
+    achieve_speed: Math.round(dim_scores.reviewSpeed * 10),
+  };
 
   const multiplier = direction === 'up' ? (1 + change_pct / 100) : (1 - change_pct / 100);
   const new_price_monthly = Math.ceil(currentPricing.price_monthly * multiplier / 5) * 5;
 
   const reasons = [];
   if (direction === 'up') {
-    if (comparison_scores.price_vs_avg >= 80) reasons.push('当前定价低于同档位均价，有上调空间');
-    if (comparison_scores.sub_rank >= 80) reasons.push('订阅数位于前20%，用户认可度高');
-    if (comparison_scores.growth_rank >= 90) reasons.push('近期订阅增速超过90%分位');
+    if (pricePct >= 0.6) reasons.push('当前定价低于同档位均价，有上调空间');
+    if (rankPct >= 0.8)  reasons.push('订阅数位于前20%，用户认可度高');
+    if (growthPct >= 0.9) reasons.push('近期订阅增速超过90%分位');
   } else {
     reasons.push('差评数量触发阈值，竞争力需提升');
-    if (comparison_scores.price_vs_avg < 60) reasons.push('当前定价高于同档位均价');
+    if (pricePct < 0.4) reasons.push('当前定价高于同档位均价');
   }
 
   return {
@@ -205,8 +301,10 @@ async function calcPriceAdjustment(strategyId, direction) {
     change_pct,
     reasons,
     new_price_monthly,
-    comparison_scores,
     old_price_monthly: currentPricing.price_monthly,
+    comparison_scores,  // 兼容旧接口
+    dim_scores,         // 各维度得分明细（0-10分，供调价报告展示）
+    percentiles,        // 各维度分位值（0-1）
   };
 }
 
