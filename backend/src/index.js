@@ -153,6 +153,7 @@ app.use('/api', publisherRatingRouter);
 // 注册发布者对账与管理后台路由
 app.use('/api/publisher', require('./api/publisher-ledger'));
 app.use('/api/admin', require('./api/admin-subscriptions'));
+app.use('/api/eastmoney', require('./api/eastmoney-routes'));
 
 /**
  * 计算持仓汇总信息
